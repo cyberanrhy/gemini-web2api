@@ -154,18 +154,14 @@ OpenAI Responses API compatible (for Codex CLI).
 | `gemini-pro` | Pro model alias |
 | `gemini-auto` | Auto model selection |
 
-## Cookie Refresh Script
+## Cookie Refresh
 
-For convenience, you can create a script to open Gemini for cookie export:
+When cookies expire, export fresh ones from your browser:
 
-```bash
-#!/bin/bash
-firefox "https://gemini.google.com/app"
-echo "After login, export cookies via cookies.txt extension"
-echo "Save to: cookie.txt"
-read -p "Press Enter when done..."
-echo "Done"
-```
+1. Open [Gemini](https://gemini.google.com/app) in Firefox
+2. Export cookies via cookies.txt extension
+3. Save as `cookie.txt` (overwrite the old one)
+4. Restart the proxy
 
 ## Troubleshooting / FAQ
 

@@ -271,7 +271,7 @@ def gemini_stream_generate(prompt: str, model_id: int, think_mode: int) -> str:
             if hasattr(e, 'read'):
                 err_body = e.read()
                 err_str = err_body.decode('utf-8', errors='replace')
-                desc = "Ошибка авторизации (401)" if "401" in str(e) else "Доступ запрещен (403)" if "403" in str(e) else "Ошибка запроса (400)" if "400" in str(e) else "Техническая ошибка"
+                desc = "Authorization error (401)" if "401" in str(e) else "Access denied (403)" if "403" in str(e) else "Bad request (400)" if "400" in str(e) else "Technical error"
                 log(f"Upstream error: {desc}. Detail: {err_str}")
             elif hasattr(e, 'response') and e.response is not None:
                 err_body = e.response.content
@@ -421,21 +421,21 @@ def _parse_cerebras_error(resp) -> str:
         typ = err.get("type", "")
         
         if resp.status_code == 402:
-            return "❌ Cerebras: не хватает средств на балансе (402 Payment Required). Пополните счёт в кабинете Cerebras."
+            return "Cerebras: insufficient balance (402 Payment Required). Top up your Cerebras account."
         elif resp.status_code == 401:
-            return "❌ Cerebras: неверный API ключ (401 Unauthorized). Проверьте ключ в конфиге."
+            return "Cerebras: invalid API key (401 Unauthorized). Check your key in config."
         elif resp.status_code == 404:
-            return f"❌ Cerebras: модель не найдена (404). {msg}"
+            return f"Cerebras: model not found (404). {msg}"
         elif resp.status_code == 429:
-            return "❌ Cerebras: превышен лимит запросов (429). Подождите немного."
+            return "Cerebras: rate limit exceeded (429). Wait and retry."
         elif resp.status_code >= 500:
-            return f"❌ Cerebras: ошибка сервера ({resp.status_code}). Попробуйте позже."
+            return f"Cerebras: server error ({resp.status_code}). Retry later."
         elif msg:
-            return f"❌ Cerebras: {msg}"
+            return f"Cerebras: {msg}"
         else:
-            return f"❌ Cerebras: ошибка {resp.status_code}"
+            return f"Cerebras: error {resp.status_code}"
     except:
-        return f"❌ Cerebras: ошибка {resp.status_code}"
+        return f"Cerebras: error {resp.status_code}"
 
 
 def cerebras_chat_completions(req: dict):
@@ -719,17 +719,17 @@ class GeminiHandler(BaseHTTPRequestHandler):
             err = None
             code = None
             ERROR_CODES = {
-                "1050": "Gemini временно недоступен (техобслуживание).",
-                "1060": "Сессия Gemini истекла — нужны свежие куки.",
-            "1096": "Требуется CAPTCHA — откройте Gemini в браузере и подтвердите, что не робот.",
-                "1150": "Слишком много запросов — превышен лимит Gemini.",
-                "1152": "Слишком много запросов — превышен лимит Gemini.",
-                "1160": "Ответ заблокирован фильтром безопасности Gemini.",
-                "1170": "Модель недоступна для этого запроса.",
-                "1180": "Сетевая ошибка Gemini — проверьте подключение.",
-                "1190": "Внутренняя ошибка сервера Gemini.",
-                "1200": "Таймаут Gemini — ответ слишком долгий.",
-                "1210": "Неизвестный ответ Gemini — возможно, изменился API.",
+                "1050": "Gemini temporarily unavailable (maintenance).",
+                "1060": "Gemini session expired — need fresh cookies.",
+            "1096": "CAPTCHA required — open Gemini in browser and verify you are human.",
+                "1150": "Too many requests — Gemini rate limit exceeded.",
+                "1152": "Too many requests — Gemini rate limit exceeded.",
+                "1160": "Response blocked by Gemini safety filter.",
+                "1170": "Model unavailable for this request.",
+                "1180": "Gemini network error — check your connection.",
+                "1190": "Internal Gemini server error.",
+                "1200": "Gemini timeout — response took too long.",
+                "1210": "Unknown Gemini response — API may have changed.",
             }
             # First check for valid content - "e" at end is just telemetry
             has_content = bool(re.search(r'"wrb\.fr"', raw))
@@ -737,7 +737,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
                 m = re.search(r'BardErrorInfo",\[(\d+)', raw)
                 if m:
                     code = m.group(1)
-                    err = ERROR_CODES.get(code, f"Ошибка Gemini {code} — см. /tmp/gemini_proxy.log")
+                    err = ERROR_CODES.get(code, f"Gemini error {code} — see proxy logs")
             elif '"48448350"' in raw and '"xsrf"' in raw:
                 m = re.search(r'"xsrf","([^"]+)"', raw)
                 if m:
@@ -747,33 +747,33 @@ class GeminiHandler(BaseHTTPRequestHandler):
                     if attempt < len(RETRY_DELAYS) + 1:
                         time.sleep(1)
                         continue
-                err = "Ошибка авторизации — cookie/xsrf_token устарели."
+                err = "Authorization error — cookie/xsrf_token expired."
             elif '"xsrf"' in raw:
-                err = "Ошибка авторизации — cookie/xsrf_token устарели."
+                err = "Authorization error — cookie/xsrf_token expired."
             elif '"e",' in raw and not has_content:
                 m = re.search(r'\["e",(\d+)', raw)
                 if m:
                     ecode = int(m.group(1))
                     E_CODES = {
-                        1: "Неизвестная ошибка Gemini.",
-                        2: "Неверный запрос к Gemini.",
-                        3: "Слишком много запросов — превышен лимит Gemini.",
-                        4: "Временная ошибка Gemini — повторите позже.",
-                        5: "Сетевая ошибка Gemini.",
-                        8: "Сервер Gemini временно перегружен — повторите позже.",
-                        9: "Внутренняя ошибка сервера Gemini.",
-                        10: "Неизвестная ошибка Gemini.",
-                        33: "Требуется CAPTCHA — откройте Gemini в браузере.",
-                        37: "Требуется CAPTCHA — откройте Gemini в браузере.",
-                        38: "Сессия недействительна — обновите куки.",
-                        40: "Сессия недействительна — обновите куки.",
-                        47: "Сервер Gemini временно недоступен.",
-                        49: "Сессия недействительна — обновите куки.",
-                        52: "Сессия недействительна — обновите куки.",
-                        55: "Требуется CAPTCHA — откройте Gemini в браузере.",
-                        78: "Требуется подтверждение — откройте Gemini в браузере.",
+                        1: "Unknown Gemini error.",
+                        2: "Invalid request to Gemini.",
+                        3: "Too many requests — Gemini rate limit exceeded.",
+                        4: "Temporary Gemini error — retry later.",
+                        5: "Gemini network error.",
+                        8: "Gemini server temporarily overloaded — retry later.",
+                        9: "Internal Gemini server error.",
+                        10: "Unknown Gemini error.",
+                        33: "CAPTCHA required — open Gemini in browser.",
+                        37: "CAPTCHA required — open Gemini in browser.",
+                        38: "Session invalid — refresh cookies.",
+                        40: "Session invalid — refresh cookies.",
+                        47: "Gemini server temporarily unavailable.",
+                        49: "Session invalid — refresh cookies.",
+                        52: "Session invalid — refresh cookies.",
+                        55: "CAPTCHA required — open Gemini in browser.",
+                        78: "Confirmation required — open Gemini in browser.",
                     }
-                    err = E_CODES.get(ecode, f"Ошибка Gemini (код e:{ecode}) — см. /tmp/gemini_proxy.log")
+                    err = E_CODES.get(ecode, f"Gemini error (code e:{ecode}) — see proxy logs")
                     if ecode in RATE_LIMIT_E_CODES:
                         code = f"e:{ecode}"
             if err and code and (code in RATE_LIMIT_CODES or (isinstance(code, str) and code.startswith("e:") and int(code.split(":")[1]) in RATE_LIMIT_E_CODES)):
