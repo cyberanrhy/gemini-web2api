@@ -1,0 +1,6 @@
+cookie.txt
+config.json
+*.bak
+*.bak_*
+__pycache__/
+*.pyc
