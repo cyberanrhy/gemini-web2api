@@ -1,4 +1,4 @@
-![Gemini Web2API screenshot](preview.jpg)
+![Gemini Web2API screenshot](https://raw.githubusercontent.com/cyberanrhy/gemini-web2api/ed037e9/preview.jpg)
 
 # Gemini Web2API
 
