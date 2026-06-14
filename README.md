@@ -1,3 +1,5 @@
+![Gemini Web2API screenshot](preview.jpg)
+
 # Gemini Web2API
 
 OpenAI-compatible proxy for [Gemini](https://gemini.google.com) Web API.
