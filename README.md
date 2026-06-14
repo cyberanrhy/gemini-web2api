@@ -1,7 +1,5 @@
 # Gemini Web2API
 
-<img src="preview.jpeg" alt="Gemini Web2API screenshot" width="100%">
-
 OpenAI-compatible proxy for [Gemini](https://gemini.google.com) Web API.
 
 Converts standard `/v1/chat/completions` requests to Gemini internal `StreamGenerate` endpoint. Works via cookie-based auth — no API key needed.
