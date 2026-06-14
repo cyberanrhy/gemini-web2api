@@ -27,7 +27,7 @@ Translate standard `/v1/chat/completions` requests to Gemini internal `StreamGen
 ```bash
 git clone https://github.com/YOUR_USERNAME/gemini-web2api.git
 cd gemini-web2api
-pip install requests httpx
+pip install -r requirements.txt
 ```
 
 ## Quick Start
@@ -200,6 +200,7 @@ curl -X POST http://localhost:8081/v1/chat/completions \
 gemini-web2api/
 ├── gemini_web2api.py      # Proxy server
 ├── config.json.example    # Configuration template
+├── requirements.txt       # Python dependencies
 ├── start.sh               # Start script
 ├── cookie.txt             # Netscape cookies (gitignored)
 ├── config.json            # Active config (gitignored)
