@@ -587,7 +587,7 @@ def messages_to_prompt(messages: list, tools: list = None) -> str:
 def parse_tool_calls(text: str) -> tuple:
     """Extract tool_call blocks. Returns (clean_text, tool_calls_list)."""
     tool_calls = []
-    pattern = r'```tool_call\s*\n(.*?)\n```'
+    pattern = r'```tool_call\s*\n(.*?)```'
     for match in re.findall(pattern, text, re.DOTALL):
         try:
             data = json.loads(match.strip())
