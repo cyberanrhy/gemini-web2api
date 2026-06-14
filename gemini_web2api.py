@@ -779,7 +779,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
             if err and code and (code in RATE_LIMIT_CODES or (isinstance(code, str) and code.startswith("e:") and int(code.split(":")[1]) in RATE_LIMIT_E_CODES)):
                 if attempt < len(RETRY_DELAYS):
                     delay = RETRY_DELAYS[attempt]
-                    log(f"Rate limit, retry {attempt+1}/{len(RETRY_DELAYS)} через {delay}с...")
+                    log(f"Rate limit, retry {attempt+1}/{len(RETRY_DELAYS)} in {delay}s...")
                     time.sleep(delay)
                     continue
             if err:
