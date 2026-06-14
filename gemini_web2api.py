@@ -14,6 +14,7 @@ import os
 import hashlib
 import argparse
 import base64
+import shutil
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
@@ -1101,12 +1102,47 @@ def main():
                 break
     load_config(config_path)
 
+    if not config_path:
+        example = "./config.json.example"
+        if os.path.exists(example):
+            shutil.copy(example, "./config.json")
+            config_path = "./config.json"
+            log("Created config.json from config.json.example")
+            load_config(config_path)
+        else:
+            print("ERROR: config.json not found.")
+            print("  Run: cp config.json.example config.json")
+            print("  Then run again.")
+            sys.exit(1)
+
     if args.port:
         CONFIG["port"] = args.port
     if args.cookie_file:
         CONFIG["cookie_file"] = args.cookie_file
     if args.proxy:
         CONFIG["proxy"] = args.proxy
+
+    cookie_file = CONFIG.get("cookie_file") or "./cookie.txt"
+    if not os.path.exists(cookie_file):
+        print(f"ERROR: cookie file not found at '{cookie_file}'.")
+        print("  1. Open https://gemini.google.com/app in Firefox and log in")
+        print("  2. Install 'cookies.txt' extension (https://addons.mozilla.org/firefox/addon/cookies-txt/)")
+        print("  3. Click the extension → Export → save as the file above")
+        print(f"  4. Then run again")
+        sys.exit(1)
+    CONFIG["cookie_file"] = cookie_file
+
+    if not CONFIG.get("xsrf_token"):
+        log("xsrf_token not set — trying auto-init...")
+        try:
+            gemini_init()
+        except Exception as e:
+            print(f"ERROR: Could not auto-init xsrf_token: {e}")
+            print("  Set xsrf_token manually in config.json:")
+            print("  1. Open https://gemini.google.com/app in Firefox")
+            print("  2. View page source (Ctrl+U), search for 'SNlM0e'")
+            print("  3. Copy the value into config.json as 'xsrf_token'")
+            sys.exit(1)
 
     class ThreadedServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
