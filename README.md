@@ -1,4 +1,4 @@
-![Gemini Web2API screenshot](preview.png)
+![Gemini Web2API screenshot](preview.jpg)
 
 # Gemini Web2API
 
