@@ -780,7 +780,9 @@ class GeminiHandler(BaseHTTPRequestHandler):
             time.sleep(total_delay)
 
         RATE_LIMIT_CODES = {"1150", "1152"}
-        RATE_LIMIT_E_CODES = {3, 4, 8, 29, 32, 47, 52}
+        RATE_LIMIT_E_CODES = {3, 4, 8, 29, 32, 47}
+        SESSION_EXPIRY_CODES = {"1060", "1155"}
+        SESSION_EXPIRY_E_CODES = {38, 40, 49, 52}
         RETRY_DELAYS = [15, 60, 180, 360]
 
         for attempt in range(len(RETRY_DELAYS) + 1):
@@ -854,6 +856,17 @@ class GeminiHandler(BaseHTTPRequestHandler):
                     log(f"Rate limit, retry {attempt+1}/{len(RETRY_DELAYS)} in {delay}s...")
                     time.sleep(delay)
                     continue
+            # Auto-recover session expiry
+            if err and code and (code in SESSION_EXPIRY_CODES or (isinstance(code, str) and code.startswith("e:") and int(code.split(":")[1]) in SESSION_EXPIRY_E_CODES)):
+                log(f"Session expired ({code}), attempting auto-recovery...")
+                try:
+                    _init_http_session()
+                    gemini_init()
+                    log("Session recovery OK, retrying request...")
+                    time.sleep(2)
+                    continue
+                except Exception as recoverr:
+                    log(f"Session recovery failed: {recoverr}")
             if err:
                 return err, None
             break
