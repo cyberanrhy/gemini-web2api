@@ -723,6 +723,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
                 "1050": "Gemini temporarily unavailable (maintenance).",
                 "1060": "Gemini session expired — need fresh cookies.",
             "1096": "CAPTCHA required — open Gemini in browser and verify you are human.",
+                "1099": "Gemini session expired — need fresh cookies or update gemini_bl.",
                 "1150": "Too many requests — Gemini rate limit exceeded.",
                 "1152": "Too many requests — Gemini rate limit exceeded.",
                 "1160": "Response blocked by Gemini safety filter.",
