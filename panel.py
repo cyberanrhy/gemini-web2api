@@ -39,6 +39,12 @@ CLAUDE_COOKIE_SCRIPT = os.path.join(HOME, ".local", "bin", "claude-cookie-update
 GEMINI_COOKIE_FILE = os.path.join(GEMINI_DIR, "cookie.txt")
 CLAUDE_COOKIE_FILE = os.path.join(CLAUDE_DIR, "cookie_claude.txt")
 
+GEMINI_SCRIPT = os.path.join(GEMINI_DIR, "gemini_web2api.py")
+CLAUDE_SCRIPT = os.path.join(CLAUDE_DIR, "claude_web2api.py")
+
+GEMINI_REPO = "https://github.com/cyberanrhy/gemini-web2api.git"
+CLAUDE_REPO = "https://github.com/cyberanrhy/claude-web2api.git"
+
 VPN_HOST = "127.0.0.1"
 VPN_PORT = 12334
 
@@ -122,6 +128,59 @@ def count_proxy_process(port):
         return 0
     except Exception:
         return -1
+
+
+def is_installed(name):
+    script = GEMINI_SCRIPT if name == "gemini" else CLAUDE_SCRIPT
+    return os.path.exists(script)
+
+
+def install_proxy(name):
+    """Git clone the proxy repo and do initial setup."""
+    repo_url = GEMINI_REPO if name == "gemini" else CLAUDE_REPO
+    dest_dir = GEMINI_DIR if name == "gemini" else CLAUDE_DIR
+    script = GEMINI_SCRIPT if name == "gemini" else CLAUDE_SCRIPT
+
+    if is_installed(name):
+        return {"success": True, "message": f"{name} is already installed at {dest_dir}"}
+
+    # Try with no proxy first, fallback to Hiddify
+    env = os.environ.copy()
+    env.pop("http_proxy", None)
+    env.pop("https_proxy", None)
+    env.pop("HTTP_PROXY", None)
+    env.pop("HTTPS_PROXY", None)
+
+    try:
+        # Create parent dir if needed
+        os.makedirs(dest_dir, exist_ok=True)
+
+        proc = subprocess.run(
+            ["git", "clone", repo_url, dest_dir],
+            capture_output=True, text=True, timeout=60, env=env,
+        )
+        if proc.returncode != 0:
+            # Retry with Hiddify proxy
+            proc = subprocess.run(
+                ["git", "clone", repo_url, dest_dir],
+                capture_output=True, text=True, timeout=60,
+                env={**env, "http_proxy": f"http://{VPN_HOST}:{VPN_PORT}",
+                     "https_proxy": f"http://{VPN_HOST}:{VPN_PORT}"},
+            )
+            if proc.returncode != 0:
+                return {"success": False,
+                        "message": f"git clone failed: {proc.stderr[:300]}".strip()}
+
+        # Copy config from example
+        example = os.path.join(dest_dir, "config.json.example")
+        config = os.path.join(dest_dir, "config.json")
+        if os.path.exists(example) and not os.path.exists(config):
+            import shutil
+            shutil.copy(example, config)
+
+        return {"success": True, "message": f"Installed {name} from {repo_url}"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
 
 
 def restart_proxy(name):
@@ -282,11 +341,21 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
                 action = parts[4]
                 if name in ("gemini", "claude"):
                     if action == "restart":
+                        if not is_installed(name):
+                            self._json({"success": False, "message": "not installed"}, 400)
+                            return
                         result = restart_proxy(name)
                         self._json(result)
                         return
                     elif action == "cookies":
+                        if not is_installed(name):
+                            self._json({"success": False, "message": "not installed"}, 400)
+                            return
                         result = self._handle_cookies(name)
+                        self._json(result)
+                        return
+                    elif action == "install":
+                        result = install_proxy(name)
                         self._json(result)
                         return
             self._json({"error": "invalid action"}, 400)
@@ -355,8 +424,11 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
             }
 
     def _get_status(self):
-        gemini_alive = check_port(GEMINI_PORT)
-        claude_alive = check_port(CLAUDE_PORT)
+        gemini_installed = is_installed("gemini")
+        claude_installed = is_installed("claude")
+
+        gemini_alive = check_port(GEMINI_PORT) if gemini_installed else False
+        claude_alive = check_port(CLAUDE_PORT) if claude_installed else False
         vpn_alive = check_vpn()
 
         gemini_rt = None
@@ -379,6 +451,7 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
         return {
             "gemini": {
                 "alive": gemini_alive,
+                "installed": gemini_installed,
                 "port": GEMINI_PORT,
                 "response_time": gemini_rt,
                 "cookie_expiry_days": gemini_cookie_expiry,
@@ -386,6 +459,7 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
             },
             "claude": {
                 "alive": claude_alive,
+                "installed": claude_installed,
                 "port": CLAUDE_PORT,
                 "response_time": claude_rt,
                 "cookie_expiry_days": claude_cookie_expiry,
@@ -451,6 +525,8 @@ h1{font-size:1.3em;margin-bottom:4px;color:#0f0;text-transform:uppercase;letter-
 .card-body .value.warn{color:#fa0}
 .card-body .value.critical{color:#f00}
 .actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.installed-actions{display:flex;gap:8px;flex-wrap:wrap}
+.missing-actions{display:none;gap:8px;flex-wrap:wrap}
 .btn[title]{position:relative}
 .btn[title]:hover::after{content:attr(title);position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);background:#000;color:#0f0;border:1px solid #0f0;padding:4px 8px;font-size:0.65em;white-space:nowrap;z-index:10;pointer-events:none}
 .btn{background:transparent;border:1px solid #0f0;color:#0f0;padding:6px 14px;cursor:pointer;font-family:inherit;font-size:0.78em;transition:all 0.2s}
@@ -569,11 +645,17 @@ footer a:hover{color:#0f0}
       <div class="row"><span class="label" data-i18n="label_rt">RESPONSE TIME</span><span class="value" id="geminiRT">--</span></div>
       <div class="row"><span class="label" data-i18n="label_cookies">COOKIE EXPIRY</span><span class="value" id="geminiCookies">--</span></div>
     </div>
-    <div class="actions">
-      <button class="btn btn-sm" onclick="doAction('gemini','restart')" data-i18n-title="title_restart">&gt; <span data-i18n="btn_restart">RESTART</span></button>
-      <button class="btn btn-sm" onclick="doAction('gemini','cookies')" data-i18n-title="title_export">&gt; <span data-i18n="btn_export">EXPORT</span></button>
-      <button class="btn btn-sm" onclick="openPaste('gemini')" data-i18n-title="title_paste">&gt; <span data-i18n="btn_paste">PASTE</span></button>
-      <button class="btn btn-sm" onclick="doTest('gemini')" data-i18n-title="title_test">[ <span data-i18n="btn_test">TEST</span> ]</button>
+    <div class="actions" id="geminiActions">
+      <div class="installed-actions" id="geminiInstalled">
+        <button class="btn btn-sm" onclick="doAction('gemini','restart')" data-i18n-title="title_restart">&gt; <span data-i18n="btn_restart">RESTART</span></button>
+        <button class="btn btn-sm" onclick="doAction('gemini','cookies')" data-i18n-title="title_export">&gt; <span data-i18n="btn_export">EXPORT</span></button>
+        <button class="btn btn-sm" onclick="openPaste('gemini')" data-i18n-title="title_paste">&gt; <span data-i18n="btn_paste">PASTE</span></button>
+        <button class="btn btn-sm" onclick="doTest('gemini')" data-i18n-title="title_test">[ <span data-i18n="btn_test">TEST</span> ]</button>
+        <button class="btn btn-sm" onclick="doAction('gemini','install')" data-i18n-title="title_reinstall">&gt; <span data-i18n="btn_reinstall">REINSTALL</span></button>
+      </div>
+      <div class="missing-actions" id="geminiMissing">
+        <button class="btn btn-sm" onclick="doAction('gemini','install')">&gt; <span data-i18n="btn_install">INSTALL</span></button>
+      </div>
     </div>
     <div id="geminiTest" class="test-result"><span style="color:#060" data-i18n="test_hint">TEST sends "say hi in 3 words" and shows the response</span></div>
   </div>
@@ -589,11 +671,17 @@ footer a:hover{color:#0f0}
       <div class="row"><span class="label" data-i18n="label_rt">RESPONSE TIME</span><span class="value" id="claudeRT">--</span></div>
       <div class="row"><span class="label" data-i18n="label_cookies">COOKIE EXPIRY</span><span class="value" id="claudeCookies">--</span></div>
     </div>
-    <div class="actions">
-      <button class="btn btn-sm" onclick="doAction('claude','restart')" data-i18n-title="title_restart">&gt; <span data-i18n="btn_restart">RESTART</span></button>
-      <button class="btn btn-sm" onclick="doAction('claude','cookies')" data-i18n-title="title_export">&gt; <span data-i18n="btn_export">EXPORT</span></button>
-      <button class="btn btn-sm" onclick="openPaste('claude')" data-i18n-title="title_paste">&gt; <span data-i18n="btn_paste">PASTE</span></button>
-      <button class="btn btn-sm" onclick="doTest('claude')" data-i18n-title="title_test">[ <span data-i18n="btn_test">TEST</span> ]</button>
+    <div class="actions" id="claudeActions">
+      <div class="installed-actions" id="claudeInstalled">
+        <button class="btn btn-sm" onclick="doAction('claude','restart')" data-i18n-title="title_restart">&gt; <span data-i18n="btn_restart">RESTART</span></button>
+        <button class="btn btn-sm" onclick="doAction('claude','cookies')" data-i18n-title="title_export">&gt; <span data-i18n="btn_export">EXPORT</span></button>
+        <button class="btn btn-sm" onclick="openPaste('claude')" data-i18n-title="title_paste">&gt; <span data-i18n="btn_paste">PASTE</span></button>
+        <button class="btn btn-sm" onclick="doTest('claude')" data-i18n-title="title_test">[ <span data-i18n="btn_test">TEST</span> ]</button>
+        <button class="btn btn-sm" onclick="doAction('claude','install')" data-i18n-title="title_reinstall">&gt; <span data-i18n="btn_reinstall">REINSTALL</span></button>
+      </div>
+      <div class="missing-actions" id="claudeMissing">
+        <button class="btn btn-sm" onclick="doAction('claude','install')">&gt; <span data-i18n="btn_install">INSTALL</span></button>
+      </div>
     </div>
     <div id="claudeTest" class="test-result"><span style="color:#060" data-i18n="test_hint">TEST sends "say hi in 3 words" and shows the response</span></div>
   </div>
@@ -672,6 +760,10 @@ const LANG = {
     btn_export: 'EXPORT',
     btn_paste: 'PASTE',
     btn_test: 'TEST',
+    btn_install: 'INSTALL',
+    btn_reinstall: 'REINSTALL',
+    title_reinstall: 'Reinstall from GitHub (overwrites local changes)',
+    not_installed: 'NOT INSTALLED',
     test_hint: 'TEST sends "say hi in 3 words" and shows the response',
     section_logs: '// LOGS',
     loading: 'Loading...',
@@ -741,6 +833,10 @@ const LANG = {
     btn_export: 'ЭКСПОРТ',
     btn_paste: 'ВСТАВИТЬ',
     btn_test: 'ТЕСТ',
+    btn_install: 'УСТАНОВИТЬ',
+    btn_reinstall: 'ПЕРЕУСТАНОВИТЬ',
+    title_reinstall: 'Переустановить с GitHub (перезапишет локальные изменения)',
+    not_installed: 'НЕ УСТАНОВЛЕН',
     test_hint: 'ТЕСТ отправляет "say hi in 3 words" и показывает ответ',
     section_logs: '// ЛОГИ',
     loading: 'Загрузка...',
@@ -877,27 +973,41 @@ async function fetchStatus(){
     const st = document.getElementById(name+'Status');
     const rt = document.getElementById(name+'RT');
     const ck = document.getElementById(name+'Cookies');
+    const installedDiv = document.getElementById(name+'Installed');
+    const missingDiv = document.getElementById(name+'Missing');
     
-    if(s.alive){
+    if(!s.installed){
+      ind.className='indicator unknown';
+      st.textContent=t('not_installed');
+      st.style.color='#060';
+      rt.textContent='--';
+      ck.textContent='--';
+      if(installedDiv) installedDiv.style.display='none';
+      if(missingDiv) missingDiv.style.display='flex';
+    }else if(s.alive){
       ind.className='indicator alive';
       st.textContent=t('online');
       st.style.color='#0f0';
       rt.textContent=s.response_time?s.response_time+'s':t('checking');
+      if(installedDiv) installedDiv.style.display='flex';
+      if(missingDiv) missingDiv.style.display='none';
     }else{
       ind.className='indicator dead';
       st.textContent=t('offline');
       st.style.color='#f00';
       rt.textContent='--';
+      if(installedDiv) installedDiv.style.display='flex';
+      if(missingDiv) missingDiv.style.display='none';
     }
     
-    if(s.cookie_expiry_days !== null && s.cookie_expiry_days !== undefined){
+    if(s.installed && s.cookie_expiry_days !== null && s.cookie_expiry_days !== undefined){
       const d = s.cookie_expiry_days;
       let color = '#0f0';
       if(d < 7) color = '#fa0';
       if(d < 3) color = '#f00';
       ck.textContent = d + ' ' + t('days');
       ck.style.color = color;
-    } else {
+    } else if(s.installed) {
       ck.textContent = t('unknown');
       ck.style.color = '#060';
     }
@@ -929,21 +1039,25 @@ async function fetchLogs(){
 
 // ── Actions ──
 async function doAction(name, action){
-  askConfirm(
-    `${name.toUpperCase()} — ${action === 'restart' ? t('btn_restart') : t('btn_export')}?\n${t('prompt_restart')}`,
-    async ()=>{
-      const btn = event&&event.target||document.querySelector(`.card.${name} button`);
-      if(btn) btn.disabled=true;
-      const result = await api('POST', `/api/action/${name}/${action}`);
-      if(btn) btn.disabled=false;
-      if(result.success){
-        showToast(`${name} ${action}: OK — ${result.message||''}`, false);
-      }else{
-        showToast(`${name} ${action}: ${t('fail')} — ${result.message||result.error||''}`, true);
-      }
-      setTimeout(fetchStatus, 2000);
+  const popup = action==='restart' || action==='cookies';
+  if(popup){
+    const actionLabel = action === 'restart' ? t('btn_restart') : t('btn_export');
+    askConfirm(`${name.toUpperCase()} — ${actionLabel}?\n${t('prompt_restart')}`, doActionCb);
+  }else{
+    doActionCb();
+  }
+  async function doActionCb(){
+    const btn = event&&event.target||document.querySelector(`.card.${name} button`);
+    if(btn) btn.disabled=true;
+    const result = await api('POST', `/api/action/${name}/${action}`);
+    if(btn) btn.disabled=false;
+    if(result.success){
+      showToast(`${name} ${action}: OK — ${result.message||''}`, false);
+      setTimeout(fetchStatus, 3000);
+    }else{
+      showToast(`${name} ${action}: ${t('fail')} — ${result.message||result.error||''}`, true);
     }
-  );
+  }
 }
 
 // ── Test ──
