@@ -576,8 +576,8 @@ def extract_response_text(raw: str) -> str:
 
 # ─── OpenAI Format Helpers ───────────────────────────────────────────────────
 
-MAX_CONTEXT_MSGS = 10
-MAX_TOOL_CHARS = 8000
+MAX_CONTEXT_MSGS = 6
+MAX_TOOL_CHARS = 4000
 
 def trim_context(messages: list) -> list:
     """Trim messages to prevent oversized context payloads."""
