@@ -576,6 +576,15 @@ def extract_response_text(raw: str) -> str:
 
 # ─── OpenAI Format Helpers ───────────────────────────────────────────────────
 
+MAX_CONTEXT_MSGS = 10
+
+def trim_context(messages: list) -> list:
+    """Trim messages to prevent oversized context payloads."""
+    system = [m for m in messages if m.get("role") == "system"]
+    others = [m for m in messages if m.get("role") != "system"]
+    kept = others[-MAX_CONTEXT_MSGS:] if len(others) > MAX_CONTEXT_MSGS else others
+    return system + kept
+
 def messages_to_prompt(messages: list, tools: list = None) -> str:
     """Convert OpenAI messages to prompt string."""
     parts = []
@@ -755,6 +764,15 @@ class GeminiHandler(BaseHTTPRequestHandler):
         return model_name, cfg.get("mode"), (think_override if think_override is not None else cfg.get("think")), provider, None
 
     def _call_gemini(self, prompt, model_id, think_mode, tools):
+        # Human-like think time based on prompt length
+        words = len(prompt.split())
+        think_delay = min(max(words / 50, 0.3), 4.0)  # ~1-4s for typical messages
+        jitter = random.uniform(0.7, 1.3)
+        total_delay = round(think_delay * jitter, 1)
+        if total_delay > 0.5:
+            log(f"Think delay {total_delay}s ({words} words)")
+            time.sleep(total_delay)
+
         RATE_LIMIT_CODES = {"1150", "1152"}
         RATE_LIMIT_E_CODES = {3, 4, 8, 29, 32, 47, 52}
         RETRY_DELAYS = [15, 60, 180, 360]
@@ -853,7 +871,8 @@ class GeminiHandler(BaseHTTPRequestHandler):
             return
 
         tools = req.get("tools")
-        prompt = messages_to_prompt(req.get("messages", []), tools)
+        msgs = trim_context(req.get("messages", []))
+        prompt = messages_to_prompt(msgs, tools)
         if not prompt.strip():
             self.send_json({"error": {"message": "empty prompt"}}, 400)
             return
@@ -884,6 +903,13 @@ class GeminiHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 log(f"Stream error: {e}")
             return
+
+        # Human-like delay when last message is a tool result
+        msgs = req.get("messages", [])
+        if msgs and msgs[-1].get("role") in ("tool",):
+            delay = random.uniform(2.0, 8.0)
+            log(f"Tool result detected, waiting {delay:.1f}s to simulate human...")
+            time.sleep(delay)
 
         # Non-streaming (or tool calling which needs full response)
         try:
@@ -992,6 +1018,15 @@ class GeminiHandler(BaseHTTPRequestHandler):
         if not prompt.strip():
             self.send_json({"error": {"message": "empty input"}}, 400)
             return
+
+        messages = trim_context(messages)
+        prompt = messages_to_prompt(messages, tools)
+
+        # Human-like delay when last message is a tool result
+        if messages and messages[-1].get("role") in ("tool", "function_call_output"):
+            delay = random.uniform(2.0, 8.0)
+            log(f"Tool result detected, waiting {delay:.1f}s to simulate human...")
+            time.sleep(delay)
 
         try:
             text, tool_calls = self._call_gemini(prompt, model_id, think_mode, tools)
