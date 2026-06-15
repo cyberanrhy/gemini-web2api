@@ -147,6 +147,44 @@ RELEVANT_COOKIES = {
 
 _HTTP_SESSION = None
 
+
+def _save_session_cookies():
+    """Save session cookies (from requests.Session) back to cookie file."""
+    global _HTTP_SESSION
+    if _HTTP_SESSION is None:
+        return
+    cookie_file = CONFIG.get("cookie_file")
+    if not cookie_file or not os.path.exists(cookie_file):
+        return
+    try:
+        with open(cookie_file) as f:
+            lines = f.readlines()
+        session_cookies = {}
+        for c in _HTTP_SESSION.cookies:
+            session_cookies[c.name] = c
+        updated = 0
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            parts = stripped.split("\t")
+            if len(parts) >= 7:
+                name = parts[5]
+                if name in session_cookies:
+                    sc = session_cookies[name]
+                    new_expiry = int(sc.expires) if sc.expires else int(time.time()) + 86400
+                    parts[4] = str(new_expiry)
+                    parts[6] = sc.value
+                    lines[i] = "\t".join(parts) + "\n"
+                    updated += 1
+        if updated:
+            with open(cookie_file, "w") as f:
+                f.writelines(lines)
+            log(f"Updated {updated} cookies from session (incl. __Secure-STRP)")
+    except Exception as e:
+        log(f"Failed to save session cookies: {e}")
+
+
 def _init_http_session():
     global _HTTP_SESSION
     if _HTTP_SESSION is not None:
@@ -196,6 +234,8 @@ def gemini_init(max_attempts=3):
                 page_bl = m2.group(1)
                 if page_bl != CONFIG.get("gemini_bl"):
                     log(f"Init: page has cfb2h={page_bl} (config: {CONFIG.get('gemini_bl')})")
+            # Refresh __Secure-STRP and other cookies from response
+            _save_session_cookies()
             return True
         except Exception as e:
             log(f"Init attempt {attempt+1}/{max_attempts}: {e}")

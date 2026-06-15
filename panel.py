@@ -135,14 +135,27 @@ def is_installed(name):
     return os.path.exists(script)
 
 
-def install_proxy(name):
-    """Git clone the proxy repo and do initial setup."""
+def install_proxy(name, force=False):
+    """Git clone the proxy repo and do initial setup.
+    If force=True, backup cookies+config, delete, re-clone, restore."""
     repo_url = GEMINI_REPO if name == "gemini" else CLAUDE_REPO
     dest_dir = GEMINI_DIR if name == "gemini" else CLAUDE_DIR
     script = GEMINI_SCRIPT if name == "gemini" else CLAUDE_SCRIPT
 
-    if is_installed(name):
+    if is_installed(name) and not force:
         return {"success": True, "message": f"{name} is already installed at {dest_dir}"}
+
+    # Backup user data before deleting
+    backup = {}
+    if force and os.path.exists(dest_dir):
+        for fname in ["config.json", "cookie.txt", "cookie_claude.txt"]:
+            fpath = os.path.join(dest_dir, fname)
+            if os.path.exists(fpath):
+                try:
+                    with open(fpath) as f:
+                        backup[fname] = f.read()
+                except:
+                    pass
 
     # Try with no proxy first, fallback to Hiddify
     env = os.environ.copy()
@@ -152,6 +165,11 @@ def install_proxy(name):
     env.pop("HTTPS_PROXY", None)
 
     try:
+        # If force, remove existing dir before clone
+        if force and os.path.exists(dest_dir):
+            import shutil
+            shutil.rmtree(dest_dir, ignore_errors=True)
+
         # Create parent dir if needed
         os.makedirs(dest_dir, exist_ok=True)
 
@@ -171,12 +189,24 @@ def install_proxy(name):
                 return {"success": False,
                         "message": f"git clone failed: {proc.stderr[:300]}".strip()}
 
-        # Copy config from example
+        # Copy config from example if not exists
         example = os.path.join(dest_dir, "config.json.example")
         config = os.path.join(dest_dir, "config.json")
         if os.path.exists(example) and not os.path.exists(config):
             import shutil
             shutil.copy(example, config)
+
+        # Restore user data (config, cookies) from backup
+        for fname, content in backup.items():
+            fpath = os.path.join(dest_dir, fname)
+            try:
+                with open(fpath, "w") as f:
+                    f.write(content)
+            except:
+                pass
+
+        # Restart proxy to pick up new code
+        restart_proxy(name)
 
         return {"success": True, "message": f"Installed {name} from {repo_url}"}
     except Exception as e:
@@ -233,7 +263,7 @@ def run_health_test(name):
         "max_tokens": 10,
     }
     t0 = time.time()
-    status, body = http_post_json(url, payload, timeout=20)
+    status, body = http_post_json(url, payload, timeout=120)
     elapsed = round(time.time() - t0, 3)
 
     if status == 200:
@@ -264,7 +294,6 @@ def parse_cookie_expiry(filepath):
                         expiry = int(parts[4])
                         if expiry > now:
                             days = (expiry - now) / 86400
-                            name = parts[0] + "." + parts[5] if len(parts) > 5 else parts[0]
                             if min_days is None or days < min_days:
                                 min_days = days
                     except (ValueError, IndexError):
@@ -272,6 +301,82 @@ def parse_cookie_expiry(filepath):
         return round(min_days, 1) if min_days is not None else None
     except Exception:
         return None
+
+
+def read_config(name):
+    """Read proxy config.json and return proxy value."""
+    config_file = os.path.join(GEMINI_DIR if name == "gemini" else CLAUDE_DIR, "config.json")
+    if not os.path.exists(config_file):
+        return None
+    try:
+        with open(config_file) as f:
+            cfg = json.load(f)
+        return cfg.get("proxy")
+    except Exception:
+        return None
+
+
+def write_config(name, proxy_val):
+    """Write proxy value to config.json and restart the proxy."""
+    config_file = os.path.join(GEMINI_DIR if name == "gemini" else CLAUDE_DIR, "config.json")
+    if not os.path.exists(config_file):
+        return {"success": False, "message": "config.json not found"}
+    try:
+        with open(config_file) as f:
+            cfg = json.load(f)
+        if proxy_val is None:
+            cfg.pop("proxy", None)
+        else:
+            cfg["proxy"] = proxy_val
+        with open(config_file, "w") as f:
+            json.dump(cfg, f, indent=2)
+        restart_proxy(name)
+        return {"success": True, "message": "config saved, proxy restarted"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+_upstream_cache = {}
+def check_upstream_access():
+    """Check if upstream (Google/Claude) is reachable via TCP 443.
+    Returns dict with direct/proxy status per target, 60s cache."""
+    now = time.time()
+    cached = _upstream_cache.get("result")
+    cached_at = _upstream_cache.get("at", 0)
+    if cached and now - cached_at < 60:
+        return cached
+
+    vpn_alive = check_vpn()
+
+    def tcp_test(host, via_proxy=False):
+        try:
+            if via_proxy and vpn_alive:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(3)
+                s.connect(("127.0.0.1", VPN_PORT))
+                s.sendall(f"CONNECT {host}:443 HTTP/1.1\r\nHost: {host}:443\r\n\r\n".encode())
+                resp = s.recv(4096, socket.MSG_PEEK)
+                s.close()
+                return resp.startswith(b"HTTP/") or b"200" in resp
+            else:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(3)
+                s.connect((host, 443))
+                s.close()
+                return True
+        except:
+            return False
+
+    targets = [("gemini.google.com", "gemini"), ("claude.ai", "claude")]
+    results = {}
+    for host, name in targets:
+        direct = tcp_test(host)
+        via_proxy = tcp_test(host, via_proxy=True) if vpn_alive else False
+        results[name] = {"direct": direct, "proxy": via_proxy}
+
+    _upstream_cache["result"] = results
+    _upstream_cache["at"] = now
+    return results
 
 
 # ── API & Web Handler ────────────────────────────────────────────────────
@@ -317,6 +422,15 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
                 self._json(result)
             else:
                 self._json({"error": "unknown proxy"}, 404)
+        elif path.startswith("/api/config/"):
+            name = path.split("/")[-1]
+            if name in ("gemini", "claude"):
+                proxy_val = read_config(name)
+                self._json({"name": name, "proxy": proxy_val})
+            else:
+                self._json({"error": "unknown proxy"}, 404)
+        elif path == "/api/upstream":
+            self._json(check_upstream_access())
         else:
             self._json({"error": "not found"}, 404)
 
@@ -358,11 +472,28 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
                         result = install_proxy(name)
                         self._json(result)
                         return
+                    elif action == "reinstall":
+                        result = install_proxy(name, force=True)
+                        self._json(result)
+                        return
             self._json({"error": "invalid action"}, 400)
         elif path == "/api/cookies/paste/gemini" or path == "/api/cookies/paste/claude":
             name = path.split("/")[-1]
             self._handle_paste_cookies(name)
             return
+        elif path.startswith("/api/config/"):
+            name = path.split("/")[-1]
+            if name in ("gemini", "claude"):
+                try:
+                    content_len = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(content_len))
+                    proxy_val = body.get("proxy")  # None or string URL
+                    result = write_config(name, proxy_val)
+                    self._json(result)
+                except Exception as e:
+                    self._json({"success": False, "message": str(e)}, 400)
+            else:
+                self._json({"error": "unknown proxy"}, 404)
         else:
             self._json({"error": "not found"}, 404)
 
@@ -448,6 +579,9 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
         gemini_cookie_expiry = parse_cookie_expiry(GEMINI_COOKIE_FILE)
         claude_cookie_expiry = parse_cookie_expiry(CLAUDE_COOKIE_FILE)
 
+        gemini_proxy = read_config("gemini")
+        claude_proxy = read_config("claude")
+
         return {
             "gemini": {
                 "alive": gemini_alive,
@@ -456,6 +590,7 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
                 "response_time": gemini_rt,
                 "cookie_expiry_days": gemini_cookie_expiry,
                 "log_exists": os.path.exists(GEMINI_LOG),
+                "proxy": gemini_proxy,
             },
             "claude": {
                 "alive": claude_alive,
@@ -464,6 +599,7 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
                 "response_time": claude_rt,
                 "cookie_expiry_days": claude_cookie_expiry,
                 "log_exists": os.path.exists(CLAUDE_LOG),
+                "proxy": claude_proxy,
             },
             "vpn": {"alive": vpn_alive, "port": VPN_PORT},
         }
@@ -633,6 +769,10 @@ footer a:hover{color:#0f0}
   <span><button id="langSwitch" onclick="toggleLang()" style="background:none;border:1px solid #0a0;color:#0f0;cursor:pointer;font-family:inherit;font-size:0.8em;padding:2px 6px">RU</button></span>
 </div>
 
+<div id="proxyWarning" style="display:none;background:#330;border:1px solid #fa0;color:#fa0;padding:8px 12px;margin-bottom:16px;font-size:0.75em">
+  ⚠ <span data-i18n="proxy_warning">Proxy is enabled but VPN is offline — upstream may be blocked</span>
+</div>
+
 <div class="panel-grid">
   <div class="card gemini" id="geminiCard">
     <div class="card-header">
@@ -644,6 +784,8 @@ footer a:hover{color:#0f0}
       <div class="row"><span class="label" data-i18n="label_status">STATUS</span><span class="value" id="geminiStatus"><span data-i18n="scanning">scanning...</span></span></div>
       <div class="row"><span class="label" data-i18n="label_rt">RESPONSE TIME</span><span class="value" id="geminiRT">--</span></div>
       <div class="row"><span class="label" data-i18n="label_cookies">COOKIE EXPIRY</span><span class="value" id="geminiCookies">--</span></div>
+      <div class="row"><span class="label" data-i18n="label_upstream">UPSTREAM</span><span class="value" id="geminiUpstream">--</span></div>
+      <div class="row"><span class="label" data-i18n="label_proxy">PROXY</span><span class="value" id="geminiProxyRow"><span id="geminiProxyToggle" style="cursor:pointer"></span> <input id="geminiProxyUrl" type="text" style="background:#000;color:#0f0;border:1px solid #0a0;width:180px;font-family:inherit;font-size:0.85em;padding:1px 4px" placeholder="http://..."> <button class="btn small" onclick="saveProxy('gemini')" data-i18n-title="title_save_proxy">SAVE</button></span></div>
     </div>
     <div class="actions" id="geminiActions">
       <div class="installed-actions" id="geminiInstalled">
@@ -670,6 +812,8 @@ footer a:hover{color:#0f0}
       <div class="row"><span class="label" data-i18n="label_status">STATUS</span><span class="value" id="claudeStatus"><span data-i18n="scanning">scanning...</span></span></div>
       <div class="row"><span class="label" data-i18n="label_rt">RESPONSE TIME</span><span class="value" id="claudeRT">--</span></div>
       <div class="row"><span class="label" data-i18n="label_cookies">COOKIE EXPIRY</span><span class="value" id="claudeCookies">--</span></div>
+      <div class="row"><span class="label" data-i18n="label_upstream">UPSTREAM</span><span class="value" id="claudeUpstream">--</span></div>
+      <div class="row"><span class="label" data-i18n="label_proxy">PROXY</span><span class="value" id="claudeProxyRow"><span id="claudeProxyToggle" style="cursor:pointer"></span> <input id="claudeProxyUrl" type="text" style="background:#000;color:#0f0;border:1px solid #0a0;width:180px;font-family:inherit;font-size:0.85em;padding:1px 4px" placeholder="http://..."> <button class="btn small" onclick="saveProxy('claude')" data-i18n-title="title_save_proxy">SAVE</button></span></div>
     </div>
     <div class="actions" id="claudeActions">
       <div class="installed-actions" id="claudeInstalled">
@@ -797,6 +941,16 @@ const LANG = {
     no_response: 'no response',
     no_log: '[no log file]',
     empty: '[empty]',
+    label_upstream: 'UPSTREAM',
+    label_proxy: 'PROXY',
+    proxy_off: 'proxy OFF',
+    proxy_saved: 'proxy config saved',
+    proxy_no_url: 'Enter a proxy URL first',
+    proxy_warning: 'Proxy is enabled but VPN is offline — upstream may be blocked',
+    title_save_proxy: 'Save proxy URL and restart',
+    upstream_direct: 'Direct',
+    upstream_vpn: 'Via VPN',
+    upstream_blocked: 'Blocked',
   },
   ru: {
     lang_switch: 'EN',
@@ -870,6 +1024,16 @@ const LANG = {
     no_response: 'нет ответа',
     no_log: '[нет лог-файла]',
     empty: '[пусто]',
+    label_upstream: 'АПСТРИМ',
+    label_proxy: 'ПРОКСИ',
+    proxy_off: 'прокси ВЫКЛ',
+    proxy_saved: 'настройки прокси сохранены',
+    proxy_no_url: 'Сначала введи URL прокси',
+    proxy_warning: 'Прокси включён, но VPN не работает — апстрим может быть заблокирован',
+    title_save_proxy: 'Сохранить URL прокси и перезапустить',
+    upstream_direct: 'Напрямую',
+    upstream_vpn: 'Через VPN',
+    upstream_blocked: 'Заблокирован',
   }
 };
 
@@ -966,6 +1130,16 @@ async function fetchStatus(){
   const data = await api('GET', '/api/status');
   if(data.error){ showToast(t('toast_status')+': '+data.error, true); return; }
   
+  // Check proxy warning
+  let showWarning = false;
+  for(const name of ['gemini','claude']){
+    const s = data[name];
+    if(!s) continue;
+    if(s.proxy && s.proxy !== null && !data.vpn.alive) showWarning = true;
+  }
+  const pw = document.getElementById('proxyWarning');
+  if(pw) pw.style.display = showWarning ? 'block' : 'none';
+  
   for(const name of ['gemini','claude']){
     const s = data[name];
     if(!s) continue;
@@ -1011,6 +1185,60 @@ async function fetchStatus(){
       ck.textContent = t('unknown');
       ck.style.color = '#060';
     }
+
+    // Proxy toggle
+    const toggle = document.getElementById(name+'ProxyToggle');
+    const urlInput = document.getElementById(name+'ProxyUrl');
+    if(toggle && urlInput){
+      const isOn = s.proxy && s.proxy !== null;
+      toggle.textContent = isOn ? '[ON]' : '[OFF]';
+      toggle.style.color = isOn ? '#0f0' : '#500';
+      toggle.title = isOn ? s.proxy : t('proxy_off');
+      urlInput.value = isOn ? s.proxy : '';
+      toggle.onclick = () => {
+        if(isOn){
+          // Turn off
+          saveProxyConfig(name, null);
+        } else {
+          // Turn on — use current URL input or default
+          const url = urlInput.value.trim() || 'http://127.0.0.1:12334';
+          saveProxyConfig(name, url);
+        }
+      };
+    }
+
+    // Upstream status — fetch from /api/upstream (polled)
+    const upEl = document.getElementById(name+'Upstream');
+    if(upEl){
+      if(!upEl._fetching){
+        upEl._fetching = true;
+        fetchUpstream();
+      }
+    }
+  }
+
+  // Fetch upstream data separately
+  async function fetchUpstream(){
+    const upData = await api('GET', '/api/upstream');
+    if(upData && !upData.error){
+      for(const n of ['gemini','claude']){
+        const el = document.getElementById(n+'Upstream');
+        if(!el) continue;
+        const u = upData[n];
+        if(u){
+          const d = u.direct ? 'Direct' : (u.proxy ? 'Via VPN' : 'Blocked');
+          const color = u.direct ? '#0f0' : (u.proxy ? '#fa0' : '#f00');
+          const icon = u.direct ? '✔' : (u.proxy ? '🔒' : '✖');
+          el.textContent = icon+' '+d;
+          el.style.color = color;
+        } else {
+          el.textContent = '--';
+          el.style.color = '#060';
+        }
+      }
+    }
+    // Re-fetch every 30s
+    setTimeout(fetchUpstream, 30000);
   }
   
   const vpn = document.getElementById('vpnStatus');
@@ -1109,6 +1337,26 @@ async function savePastedCookies(){
     showToast(t('toast_network')+': ${e.message}', true);
   }
   textarea.disabled = false;
+}
+
+// ── Proxy Config ──
+async function saveProxyConfig(name, proxyVal){
+  const result = await api('POST', `/api/config/${name}`, {proxy: proxyVal});
+  if(result.success){
+    showToast(`${name} proxy: ${t('proxy_saved')} (${proxyVal||'OFF'})`, false);
+    setTimeout(fetchStatus, 2000);
+  }else{
+    showToast(`${name} proxy: ${t('fail')} — ${result.message||''}`, true);
+  }
+}
+
+function saveProxy(name){
+  const url = document.getElementById(name+'ProxyUrl').value.trim();
+  if(!url){
+    showToast(t('proxy_no_url'), true);
+    return;
+  }
+  saveProxyConfig(name, url);
 }
 
 // ── Init ──
