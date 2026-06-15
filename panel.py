@@ -18,6 +18,7 @@ import urllib.error
 import threading
 from datetime import datetime
 from pathlib import Path
+from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 
 # ── Config ──────────────────────────────────────────────────────────────
@@ -217,7 +218,23 @@ def parse_cookie_expiry(filepath):
 # ── API & Web Handler ────────────────────────────────────────────────────
 
 class PanelHandler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        msg = fmt % args
+        if "GET /api" in msg or "POST /api" in msg:
+            return
+        log(msg)
+
     def do_GET(self):
+        try:
+            self._do_GET()
+        except Exception as e:
+            log(f"do_GET error: {e}")
+            try:
+                self._json({"error": f"internal error: {e}"}, 500)
+            except:
+                pass
+
+    def _do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
@@ -245,6 +262,16 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
             self._json({"error": "not found"}, 404)
 
     def do_POST(self):
+        try:
+            self._do_POST()
+        except Exception as e:
+            log(f"do_POST error: {e}")
+            try:
+                self._json({"error": f"internal error: {e}"}, 500)
+            except:
+                pass
+
+    def _do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
@@ -266,6 +293,7 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/cookies/paste/gemini" or path == "/api/cookies/paste/claude":
             name = path.split("/")[-1]
             self._handle_paste_cookies(name)
+            return
         else:
             self._json({"error": "not found"}, 404)
 
@@ -423,6 +451,8 @@ h1{font-size:1.3em;margin-bottom:4px;color:#0f0;text-transform:uppercase;letter-
 .card-body .value.warn{color:#fa0}
 .card-body .value.critical{color:#f00}
 .actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.btn[title]{position:relative}
+.btn[title]:hover::after{content:attr(title);position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);background:#000;color:#0f0;border:1px solid #0f0;padding:4px 8px;font-size:0.65em;white-space:nowrap;z-index:10;pointer-events:none}
 .btn{background:transparent;border:1px solid #0f0;color:#0f0;padding:6px 14px;cursor:pointer;font-family:inherit;font-size:0.78em;transition:all 0.2s}
 .btn:hover{background:#0f0;color:#000;box-shadow:0 0 6px #0f0}
 .btn.danger{border-color:#f00;color:#f00}
@@ -470,30 +500,33 @@ footer a:hover{color:#0f0}
 
 <div id="confirmOverlay" class="confirm-overlay">
   <div class="confirm-dialog">
-    <p id="confirmMsg">Are you sure?</p>
+    <p id="confirmMsg" data-i18n="confirm_restart">Are you sure?</p>
     <div class="btn-group">
-      <button class="btn" onclick="confirmAction(true)">> CONFIRM</button>
-      <button class="btn" onclick="confirmAction(false)">> CANCEL</button>
+      <button class="btn" onclick="confirmAction(true)">&gt; <span data-i18n="btn_confirm">CONFIRM</span></button>
+      <button class="btn" onclick="confirmAction(false)">&gt; <span data-i18n="btn_cancel">CANCEL</span></button>
     </div>
   </div>
 </div>
 
 <div id="pasteOverlay" class="confirm-overlay">
   <div class="confirm-dialog" style="max-width:600px;width:90%">
-    <p id="pasteTitle">Paste cookies for <span id="pasteName">gemini</span></p>
-    <textarea id="pasteTextarea" style="width:100%;height:250px;background:#000;color:#0f0;border:1px solid #0a0;font-family:'Courier New',monospace;font-size:0.75em;padding:8px;resize:vertical;margin-bottom:12px" placeholder="Paste Netscape cookie format here...
-Copy from cookies.txt extension → Export → Ctrl+A → Ctrl+C → Ctrl+V here"></textarea>
-    <div style="font-size:0.75em;color:#080;margin-bottom:12px;text-align:left">
-      <strong>How to export cookies:</strong><br>
-      1. Install <strong>cookies.txt</strong> extension in Firefox<br>
-      2. Go to gemini.google.com (or claude.ai) — make sure you're logged in<br>
-      3. Click the extension icon → <strong>Export</strong><br>
-      4. Copy all text (Ctrl+A → Ctrl+C) and paste above (Ctrl+V)<br>
-      5. Click SAVE
+    <p style="font-size:1.1em;margin-bottom:8px">📋 <span data-i18n="paste_title">PASTE COOKIES</span>: <span id="pasteName" style="color:#0f0">gemini</span></p>
+    <p id="pasteDesc" data-i18n="paste_desc1" style="font-size:0.75em;color:#060;margin-bottom:8px">
+      Paste Netscape cookie format below (tab-separated).<br>
+      Firefox → <strong>cookies.txt</strong> extension → Export → Ctrl+A → Ctrl+C → Ctrl+V ↓
+    </p>
+    <textarea id="pasteTextarea" style="width:100%;height:200px;background:#000;color:#0f0;border:1px solid #0a0;font-family:'Courier New',monospace;font-size:0.7em;padding:8px;resize:vertical;margin-bottom:8px" placeholder=".gemini.google.com	TRUE	/	FALSE	1767225600	name	value"></textarea>
+    <div id="pasteHowto" style="font-size:0.7em;color:#060;margin-bottom:8px;text-align:left;background:rgba(0,255,0,0.03);padding:8px;border:1px solid #0a0">
+      <strong data-i18n="paste_howto_title" style="color:#080">How to export cookies:</strong><br>
+      <span data-i18n="paste_step1">1. Install <strong>cookies.txt</strong> extension in Firefox</span><br>
+      <span data-i18n="paste_step2">2. Go to gemini.google.com (or claude.ai) — make sure you're logged in</span><br>
+      <span data-i18n="paste_step3">3. Click the extension icon → <strong>Export</strong></span><br>
+      <span data-i18n="paste_step4">4. Copy all text (Ctrl+A → Ctrl+C) and paste above (Ctrl+V)</span><br>
+      <span data-i18n="paste_step5">5. Click <strong>SAVE</strong></span>
     </div>
     <div class="btn-group">
-      <button class="btn" onclick="savePastedCookies()">> SAVE</button>
-      <button class="btn" onclick="closePasteOverlay()">> CANCEL</button>
+      <button class="btn" onclick="savePastedCookies()">&gt; <span data-i18n="btn_save">SAVE</span> ✓</button>
+      <button class="btn" onclick="closePasteOverlay()">&gt; <span data-i18n="btn_cancel">CANCEL</span> ✕</button>
     </div>
   </div>
 </div>
@@ -502,15 +535,26 @@ Copy from cookies.txt extension → Export → Ctrl+A → Ctrl+C → Ctrl+V here
 
 <div id="toast" class="toast"></div>
 
-<h1>// PROXY CONTROL PANEL</h1>
+<div id="howToUse" style="text-align:center;font-size:0.9em;color:#0a0;margin-bottom:16px;line-height:1.6;border:1px solid #0a0;padding:12px;background:rgba(0,255,0,0.03)">
+  <strong data-i18n="howto_title">// HOW TO USE</strong><br>
+  <strong style="color:#0f0">RESTART</strong>&nbsp;<span data-i18n="howto_restart">restart the proxy</span> &nbsp;|&nbsp;
+  <strong style="color:#0f0">EXPORT</strong>&nbsp;<span data-i18n="howto_export">Firefox → export cookies to terminal</span> &nbsp;|&nbsp;
+  <strong style="color:#0f0">PASTE</strong>&nbsp;<span data-i18n="howto_paste">paste cookies from clipboard</span> &nbsp;|&nbsp;
+  <strong style="color:#0f0">TEST</strong>&nbsp;<span data-i18n="howto_test">check if proxy responds</span><br>
+  <span style="color:#060"><span data-i18n="status_legend">STATUS — 🟢 alive / 🔴 dead</span> &nbsp;|&nbsp; <span data-i18n="cookie_legend">COOKIE EXPIRY — days until cookies expire</span></span>
+</div>
+
+<h1><span data-i18n="panel_title">// PROXY CONTROL PANEL</span></h1>
 <div class="sub">[ system v1.0 ] — gemini-web2api + claude-web2api</div>
 
 <div class="status-bar">
-  <span id="vpnStatus"><span class="indicator unknown" style="width:6px;height:6px"></span> VPN checking...</span>
+  <span id="vpnStatus"><span class="indicator unknown" style="width:6px;height:6px"></span> <span data-i18n="vpn_checking">VPN checking...</span></span>
   <span id="timeDisplay">--:--:--</span>
   <span>|</span>
   <span><a href="https://github.com/cyberanrhy/gemini-web2api" target="_blank" style="color:#080">gemini-web2api</a></span>
   <span><a href="https://github.com/cyberanrhy/claude-web2api" target="_blank" style="color:#080">claude-web2api</a></span>
+  <span>|</span>
+  <span><button id="langSwitch" onclick="toggleLang()" style="background:none;border:1px solid #0a0;color:#0f0;cursor:pointer;font-family:inherit;font-size:0.8em;padding:2px 6px">RU</button></span>
 </div>
 
 <div class="panel-grid">
@@ -521,17 +565,17 @@ Copy from cookies.txt extension → Export → Ctrl+A → Ctrl+C → Ctrl+V here
     </div>
     <div class="card-body" id="geminiBody">
       <div class="row"><span class="label">PORT</span><span class="value">8081</span></div>
-      <div class="row"><span class="label">STATUS</span><span class="value" id="geminiStatus">scanning...</span></div>
-      <div class="row"><span class="label">RESPONSE TIME</span><span class="value" id="geminiRT">--</span></div>
-      <div class="row"><span class="label">COOKIE EXPIRY</span><span class="value" id="geminiCookies">--</span></div>
+      <div class="row"><span class="label" data-i18n="label_status">STATUS</span><span class="value" id="geminiStatus"><span data-i18n="scanning">scanning...</span></span></div>
+      <div class="row"><span class="label" data-i18n="label_rt">RESPONSE TIME</span><span class="value" id="geminiRT">--</span></div>
+      <div class="row"><span class="label" data-i18n="label_cookies">COOKIE EXPIRY</span><span class="value" id="geminiCookies">--</span></div>
     </div>
     <div class="actions">
-      <button class="btn btn-sm" onclick="doAction('gemini','restart')">> RESTART</button>
-      <button class="btn btn-sm" onclick="doAction('gemini','cookies')">> EXPORT</button>
-      <button class="btn btn-sm" onclick="openPaste('gemini')">> PASTE</button>
-      <button class="btn btn-sm" onclick="doTest('gemini')">> TEST</button>
+      <button class="btn btn-sm" onclick="doAction('gemini','restart')" data-i18n-title="title_restart">&gt; <span data-i18n="btn_restart">RESTART</span></button>
+      <button class="btn btn-sm" onclick="doAction('gemini','cookies')" data-i18n-title="title_export">&gt; <span data-i18n="btn_export">EXPORT</span></button>
+      <button class="btn btn-sm" onclick="openPaste('gemini')" data-i18n-title="title_paste">&gt; <span data-i18n="btn_paste">PASTE</span></button>
+      <button class="btn btn-sm" onclick="doTest('gemini')" data-i18n-title="title_test">[ <span data-i18n="btn_test">TEST</span> ]</button>
     </div>
-    <div id="geminiTest" class="test-result">Press TEST to send a request</div>
+    <div id="geminiTest" class="test-result"><span style="color:#060" data-i18n="test_hint">TEST sends "say hi in 3 words" and shows the response</span></div>
   </div>
 
   <div class="card claude" id="claudeCard">
@@ -541,39 +585,45 @@ Copy from cookies.txt extension → Export → Ctrl+A → Ctrl+C → Ctrl+V here
     </div>
     <div class="card-body" id="claudeBody">
       <div class="row"><span class="label">PORT</span><span class="value">8082</span></div>
-      <div class="row"><span class="label">STATUS</span><span class="value" id="claudeStatus">scanning...</span></div>
-      <div class="row"><span class="label">RESPONSE TIME</span><span class="value" id="claudeRT">--</span></div>
-      <div class="row"><span class="label">COOKIE EXPIRY</span><span class="value" id="claudeCookies">--</span></div>
+      <div class="row"><span class="label" data-i18n="label_status">STATUS</span><span class="value" id="claudeStatus"><span data-i18n="scanning">scanning...</span></span></div>
+      <div class="row"><span class="label" data-i18n="label_rt">RESPONSE TIME</span><span class="value" id="claudeRT">--</span></div>
+      <div class="row"><span class="label" data-i18n="label_cookies">COOKIE EXPIRY</span><span class="value" id="claudeCookies">--</span></div>
     </div>
     <div class="actions">
-      <button class="btn btn-sm" onclick="doAction('claude','restart')">> RESTART</button>
-      <button class="btn btn-sm" onclick="doAction('claude','cookies')">> EXPORT</button>
-      <button class="btn btn-sm" onclick="openPaste('claude')">> PASTE</button>
-      <button class="btn btn-sm" onclick="doTest('claude')">> TEST</button>
+      <button class="btn btn-sm" onclick="doAction('claude','restart')" data-i18n-title="title_restart">&gt; <span data-i18n="btn_restart">RESTART</span></button>
+      <button class="btn btn-sm" onclick="doAction('claude','cookies')" data-i18n-title="title_export">&gt; <span data-i18n="btn_export">EXPORT</span></button>
+      <button class="btn btn-sm" onclick="openPaste('claude')" data-i18n-title="title_paste">&gt; <span data-i18n="btn_paste">PASTE</span></button>
+      <button class="btn btn-sm" onclick="doTest('claude')" data-i18n-title="title_test">[ <span data-i18n="btn_test">TEST</span> ]</button>
     </div>
-    <div id="claudeTest" class="test-result">Press TEST to send a request</div>
+    <div id="claudeTest" class="test-result"><span style="color:#060" data-i18n="test_hint">TEST sends "say hi in 3 words" and shows the response</span></div>
   </div>
 </div>
 
-<div class="section-title">// LOGS</div>
+<div class="section-title" data-i18n="section_logs">// LOGS</div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
   <div>
     <div style="font-size:0.7em;color:#060;margin-bottom:4px">gemini.log</div>
-    <div class="log-box" id="geminiLogBox">Loading...</div>
+    <div class="log-box" id="geminiLogBox"><span data-i18n="loading">Loading...</span></div>
   </div>
   <div>
     <div style="font-size:0.7em;color:#060;margin-bottom:4px">claude.log</div>
-    <div class="log-box" id="claudeLogBox">Loading...</div>
+    <div class="log-box" id="claudeLogBox"><span data-i18n="loading">Loading...</span></div>
   </div>
 </div>
 
-<div class="section-title">// QUICK INFO</div>
-<p style="font-size:0.75em;color:#060;line-height:1.6">
-  <strong style="color:#080">RESTART</strong> — kills the proxy process and starts a fresh one.<br>
-  <strong style="color:#080">EXPORT</strong> — opens Firefox to export fresh cookies via terminal script.<br>
-  <strong style="color:#080">PASTE</strong> — paste cookies directly from clipboard (cookies.txt extension → Export → Ctrl+C → Ctrl+V).<br>
-  <strong style="color:#080">TEST</strong> — sends "say hi in 3 words" to the proxy and shows the response.<br>
-  <strong style="color:#080">COOKIE EXPIRY</strong> — days until the earliest cookie in the file expires (based on expiry timestamps).
+<div class="section-title" data-i18n="section_quickinfo">// QUICK INFO</div>
+<p style="font-size:0.75em;color:#060;line-height:1.8">
+  <strong style="color:#0f0">RESTART</strong> — <span data-i18n="qi_restart">kill & restart the proxy process</span>.<br>
+  <strong style="color:#0f0">EXPORT</strong> — <span data-i18n="qi_export">open Firefox → export fresh cookies via terminal script (requires Firefox + cookies.txt)</span>.<br>
+  <strong style="color:#0f0">PASTE</strong> — <span data-i18n="qi_paste">paste cookies from clipboard. cookies.txt → Export → Ctrl+A → Ctrl+C → Ctrl+V → SAVE</span>.<br>
+  <strong style="color:#0f0">TEST</strong> — <span data-i18n="qi_test">send test request ("say hi in 3 words") and show response + time</span>.<br>
+  <strong style="color:#0f0">COOKIE EXPIRY</strong> — <span data-i18n="qi_cookie_expiry">days until the earliest cookie expires (0 = update now)</span>.<br>
+  <strong style="color:#0f0">STATUS</strong> — <span data-i18n="qi_status">🟢 alive / 🔴 dead / 🟡 checking...</span><br>
+  <strong style="color:#0f0">RESPONSE TIME</strong> — <span data-i18n="qi_rt">how many ms the proxy took to respond (lower is better)</span>.<br>
+  <strong style="color:#0f0">VPN</strong> — <span data-i18n="qi_vpn">checks if Hiddify (127.0.0.1:12334) is running</span>.
+</p>
+<p style="font-size:0.7em;color:#040;margin-top:8px">
+  <em data-i18n="qi_tip">Tip: if the proxy is 🔴, try RESTART or update cookies via PASTE / EXPORT.</em>
 </p>
 
 <footer>
@@ -581,9 +631,178 @@ Copy from cookies.txt extension → Export → Ctrl+A → Ctrl+C → Ctrl+V here
   &middot;
   <a href="https://github.com/cyberanrhy/claude-web2api">claude-web2api</a>
   &middot; Proxy Control Panel v1.0
+  &middot; <span style="color:#060" data-i18n="footer_refresh">F5 — refresh status</span>
 </footer>
 
 <script>
+// ── Internationalization ──
+const LANG = {
+  en: {
+    lang_switch: 'RU',
+    confirm_restart: 'This will temporarily interrupt the proxy (1-2 seconds). Continue?',
+    btn_confirm: 'CONFIRM',
+    btn_cancel: 'CANCEL',
+    paste_title: 'PASTE COOKIES',
+    paste_desc1: 'Paste Netscape cookie format below (tab-separated).<br>Firefox → <strong>cookies.txt</strong> extension → Export → Ctrl+A → Ctrl+C → Ctrl+V ↓',
+    paste_howto_title: 'How to export cookies:',
+    paste_step1: '1. Install <strong>cookies.txt</strong> extension in Firefox',
+    paste_step2: '2. Go to gemini.google.com (or claude.ai) — make sure you\'re logged in',
+    paste_step3: '3. Click the extension icon → <strong>Export</strong>',
+    paste_step4: '4. Copy all text (Ctrl+A → Ctrl+C) and paste above (Ctrl+V)',
+    paste_step5: '5. Click <strong>SAVE</strong>',
+    btn_save: 'SAVE',
+    howto_title: '// HOW TO USE',
+    howto_restart: 'restart the proxy',
+    howto_export: 'Firefox → export cookies to terminal',
+    howto_paste: 'paste cookies from clipboard',
+    howto_test: 'check if proxy responds',
+    status_legend: 'STATUS — 🟢 alive / 🔴 dead',
+    cookie_legend: 'COOKIE EXPIRY — days until cookies expire',
+    panel_title: '// PROXY CONTROL PANEL',
+    vpn_checking: 'VPN checking...',
+    label_status: 'STATUS',
+    label_rt: 'RESPONSE TIME',
+    label_cookies: 'COOKIE EXPIRY',
+    scanning: 'scanning...',
+    title_restart: 'Kill & restart the proxy process',
+    title_export: 'Open Firefox to export cookies to terminal',
+    title_paste: 'Paste cookies from clipboard (Netscape format)',
+    title_test: 'Send "say hi" to check if proxy responds',
+    btn_restart: 'RESTART',
+    btn_export: 'EXPORT',
+    btn_paste: 'PASTE',
+    btn_test: 'TEST',
+    test_hint: 'TEST sends "say hi in 3 words" and shows the response',
+    section_logs: '// LOGS',
+    loading: 'Loading...',
+    section_quickinfo: '// QUICK INFO',
+    qi_restart: 'kill & restart the proxy process',
+    qi_export: 'open Firefox → export fresh cookies via terminal script (requires Firefox + cookies.txt)',
+    qi_paste: 'paste cookies from clipboard. cookies.txt → Export → Ctrl+A → Ctrl+C → Ctrl+V → SAVE',
+    qi_test: 'send test request ("say hi in 3 words") and show response + time',
+    qi_cookie_expiry: 'days until the earliest cookie expires (0 = update now)',
+    qi_status: '🟢 alive / 🔴 dead / 🟡 checking...',
+    qi_rt: 'how many ms the proxy took to respond (lower is better)',
+    qi_vpn: 'checks if Hiddify (127.0.0.1:12334) is running',
+    qi_tip: 'Tip: if the proxy is 🔴, try RESTART or update cookies via PASTE / EXPORT.',
+    footer_refresh: 'F5 — refresh status',
+    online: 'ONLINE',
+    offline: 'OFFLINE',
+    checking: 'checking...',
+    days: 'days',
+    unknown: 'unknown',
+    vpn_online: 'ONLINE',
+    vpn_offline: 'OFFLINE',
+    toast_paste_short: 'Paste is too short — copy the full export from cookies.txt',
+    toast_saved: 'cookies saved',
+    toast_error: 'Error',
+    toast_network: 'Network error',
+    toast_status: 'Status error',
+    prompt_restart: 'The proxy will be interrupted for 1-2 seconds.',
+    sending: 'sending request...',
+    ok: 'OK',
+    fail: 'FAIL',
+    no_response: 'no response',
+    no_log: '[no log file]',
+    empty: '[empty]',
+  },
+  ru: {
+    lang_switch: 'EN',
+    confirm_restart: 'Прокси временно прервётся (на 1-2 секунды). Продолжить?',
+    btn_confirm: 'ПОДТВЕРДИТЬ',
+    btn_cancel: 'ОТМЕНА',
+    paste_title: 'ВСТАВИТЬ КУКИ',
+    paste_desc1: 'Вставь сюда куки из буфера (Netscape формат — строки с табами).<br>Firefox → расширение <strong>cookies.txt</strong> → Export → Ctrl+A → Ctrl+C → Ctrl+V ↓',
+    paste_howto_title: 'Как получить куки:',
+    paste_step1: '1. Установи расширение <strong>cookies.txt</strong> в Firefox',
+    paste_step2: '2. Зайди на gemini.google.com (или claude.ai) — ты должен быть залогинен',
+    paste_step3: '3. Нажми на иконку расширения → <strong>Export</strong>',
+    paste_step4: '4. Выдели всё (Ctrl+A) → скопируй (Ctrl+C) → вставь выше (Ctrl+V)',
+    paste_step5: '5. Нажми <strong>SAVE</strong>',
+    btn_save: 'СОХРАНИТЬ',
+    howto_title: '// КАК ПОЛЬЗОВАТЬСЯ',
+    howto_restart: 'перезапустить прокси',
+    howto_export: 'Firefox → экспорт кук в терминал',
+    howto_paste: 'вставить куки из буфера',
+    howto_test: 'проверить, отвечает ли прокси',
+    status_legend: 'СТАТУС — 🟢 живо / 🔴 умерло',
+    cookie_legend: 'COOKIE EXPIRY — через сколько дней протухнут куки',
+    panel_title: '// ПАНЕЛЬ УПРАВЛЕНИЯ ПРОКСИ',
+    vpn_checking: 'Проверка VPN...',
+    label_status: 'СТАТУС',
+    label_rt: 'ВРЕМЯ ОТВЕТА',
+    label_cookies: 'СРОК КУК',
+    scanning: 'сканирование...',
+    title_restart: 'Убить и перезапустить прокси',
+    title_export: 'Открыть Firefox для экспорта кук в терминал',
+    title_paste: 'Вставить куки из буфера (Netscape формат)',
+    title_test: 'Отправить "say hi" для проверки прокси',
+    btn_restart: 'ПЕРЕЗАПУСК',
+    btn_export: 'ЭКСПОРТ',
+    btn_paste: 'ВСТАВИТЬ',
+    btn_test: 'ТЕСТ',
+    test_hint: 'ТЕСТ отправляет "say hi in 3 words" и показывает ответ',
+    section_logs: '// ЛОГИ',
+    loading: 'Загрузка...',
+    section_quickinfo: '// ПОДСКАЗКИ',
+    qi_restart: 'перезапустить прокси (убить процесс и запустить заново)',
+    qi_export: 'открыть Firefox → экспортировать свежие куки через терминальный скрипт (нужен Firefox с cookies.txt)',
+    qi_paste: 'вставить куки из буфера обмена. cookies.txt → Export → Ctrl+A → Ctrl+C → Ctrl+V → SAVE',
+    qi_test: 'отправить тестовый запрос ("say hi in 3 words") и показать ответ + время',
+    qi_cookie_expiry: 'через сколько дней протухнут самые старые куки (0 = пора обновлять)',
+    qi_status: '🟢 живо / 🔴 не отвечает / 🟡 проверка...',
+    qi_rt: 'сколько миллисекунд ждал ответ (чем меньше, тем лучше)',
+    qi_vpn: 'проверка, работает ли Hiddify (127.0.0.1:12334)',
+    qi_tip: 'Если прокси не отвечает (🔴), попробуй ПЕРЕЗАПУСК или обнови куки через ВСТАВИТЬ / ЭКСПОРТ.',
+    footer_refresh: 'F5 — обновить статус',
+    online: 'РАБОТАЕТ',
+    offline: 'НЕ ОТВЕЧАЕТ',
+    checking: 'проверка...',
+    days: 'дн.',
+    unknown: 'неизвестно',
+    vpn_online: 'РАБОТАЕТ',
+    vpn_offline: 'НЕ РАБОТАЕТ',
+    toast_paste_short: 'Слишком коротко — скопируй полный экспорт из cookies.txt',
+    toast_saved: 'куки сохранены',
+    toast_error: 'Ошибка',
+    toast_network: 'Ошибка сети',
+    toast_status: 'Ошибка статуса',
+    prompt_restart: 'Прокси временно прервётся (на 1-2 секунды).',
+    sending: 'отправка запроса...',
+    ok: 'OK',
+    fail: 'ОШИБКА',
+    no_response: 'нет ответа',
+    no_log: '[нет лог-файла]',
+    empty: '[пусто]',
+  }
+};
+
+let currentLang = localStorage.getItem('panel_lang') || 'en';
+document.getElementById('langSwitch').textContent = LANG[currentLang].lang_switch;
+
+function t(key){
+  return LANG[currentLang][key] || key;
+}
+
+function applyLang(){
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    el.innerHTML = t(key);
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => {
+    const key = el.getAttribute('data-i18n-title');
+    el.title = t(key);
+  });
+  document.getElementById('langSwitch').textContent = t('lang_switch');
+}
+
+function toggleLang(){
+  currentLang = currentLang === 'en' ? 'ru' : 'en';
+  localStorage.setItem('panel_lang', currentLang);
+  applyLang();
+  fetchStatus();
+}
+
 // ── State ──
 let pendingAction = null;
 
@@ -649,7 +868,7 @@ async function api(method, path, body){
 // ── Fetch Status ──
 async function fetchStatus(){
   const data = await api('GET', '/api/status');
-  if(data.error){ showToast('Status error: '+data.error, true); return; }
+  if(data.error){ showToast(t('toast_status')+': '+data.error, true); return; }
   
   for(const name of ['gemini','claude']){
     const s = data[name];
@@ -661,12 +880,12 @@ async function fetchStatus(){
     
     if(s.alive){
       ind.className='indicator alive';
-      st.textContent='ONLINE';
+      st.textContent=t('online');
       st.style.color='#0f0';
-      rt.textContent=s.response_time?s.response_time+'s':'checking...';
+      rt.textContent=s.response_time?s.response_time+'s':t('checking');
     }else{
       ind.className='indicator dead';
-      st.textContent='OFFLINE';
+      st.textContent=t('offline');
       st.style.color='#f00';
       rt.textContent='--';
     }
@@ -676,10 +895,10 @@ async function fetchStatus(){
       let color = '#0f0';
       if(d < 7) color = '#fa0';
       if(d < 3) color = '#f00';
-      ck.textContent = d + ' days';
+      ck.textContent = d + ' ' + t('days');
       ck.style.color = color;
     } else {
-      ck.textContent = 'unknown';
+      ck.textContent = t('unknown');
       ck.style.color = '#060';
     }
   }
@@ -687,7 +906,7 @@ async function fetchStatus(){
   const vpn = document.getElementById('vpnStatus');
   if(data.vpn){
     const a = data.vpn.alive;
-    vpn.innerHTML = '<span class="indicator '+(a?'alive':'dead')+'" style="width:6px;height:6px"></span> VPN '+(a?'ONLINE':'OFFLINE');
+    vpn.innerHTML = '<span class="indicator '+(a?'alive':'dead')+'" style="width:6px;height:6px"></span> VPN '+(a?t('vpn_online'):t('vpn_offline'));
   }
   
   document.getElementById('timeDisplay').textContent = new Date().toLocaleTimeString();
@@ -700,9 +919,9 @@ async function fetchLogs(){
     if(!box) continue;
     const data = await api('GET', `/api/logs/${name}`);
     if(data.log === null){
-      box.textContent = '[no log file]';
+      box.textContent = t('no_log');
     } else {
-      box.textContent = data.log || '[empty]';
+      box.textContent = data.log || t('empty');
     }
     box.scrollTop = box.scrollHeight;
   }
@@ -710,12 +929,8 @@ async function fetchLogs(){
 
 // ── Actions ──
 async function doAction(name, action){
-  const labels = {
-    restart: 'RESTART',
-    cookies: 'REFRESH COOKIES'
-  };
   askConfirm(
-    `${name.toUpperCase()} > ${labels[action]||action}\nThis will temporarily interrupt the proxy.`,
+    `${name.toUpperCase()} — ${action === 'restart' ? t('btn_restart') : t('btn_export')}?\n${t('prompt_restart')}`,
     async ()=>{
       const btn = event&&event.target||document.querySelector(`.card.${name} button`);
       if(btn) btn.disabled=true;
@@ -724,7 +939,7 @@ async function doAction(name, action){
       if(result.success){
         showToast(`${name} ${action}: OK — ${result.message||''}`, false);
       }else{
-        showToast(`${name} ${action}: FAIL — ${result.message||result.error||''}`, true);
+        showToast(`${name} ${action}: ${t('fail')} — ${result.message||result.error||''}`, true);
       }
       setTimeout(fetchStatus, 2000);
     }
@@ -734,15 +949,15 @@ async function doAction(name, action){
 // ── Test ──
 async function doTest(name){
   const div = document.getElementById(name+'Test');
-  div.textContent = '> sending request...';
+  div.textContent = '> '+t('sending');
   div.className = 'test-result';
   const result = await api('GET', `/api/test/${name}`);
   if(result.success){
     div.className = 'test-result success';
-    div.textContent = `> OK (${result.time}s): "${result.response}"`;
+    div.textContent = `> ${t('ok')} (${result.time}s): "${result.response}"`;
   }else{
     div.className = 'test-result fail';
-    div.textContent = `> FAIL (${result.time}s): ${result.response||'no response'}`;
+    div.textContent = `> ${t('fail')} (${result.time}s): ${result.response||t('no_response')}`;
   }
 }
 
@@ -762,7 +977,7 @@ async function savePastedCookies(){
   const textarea = document.getElementById('pasteTextarea');
   const raw = textarea.value;
   if(!raw || raw.length < 20){
-    showToast('Paste is too short — copy the full export from cookies.txt', true);
+    showToast(t('toast_paste_short'), true);
     return;
   }
   textarea.disabled = true;
@@ -770,19 +985,20 @@ async function savePastedCookies(){
     const r = await fetch(`/api/cookies/paste/${pasteTarget}`, {method:'POST', body:raw});
     const result = await r.json();
     if(result.success){
-      showToast(`${pasteTarget} cookies saved (${result.message})`, false);
+      showToast(`${pasteTarget} ${t('toast_saved')} (${result.message})`, false);
       closePasteOverlay();
       setTimeout(fetchStatus, 1000);
     }else{
-      showToast(`Error: ${result.message}`, true);
+      showToast(t('toast_error')+': ${result.message}', true);
     }
   }catch(e){
-    showToast(`Network error: ${e.message}`, true);
+    showToast(t('toast_network')+': ${e.message}', true);
   }
   textarea.disabled = false;
 }
 
-// ── Auto Polling ──
+// ── Init ──
+applyLang();
 fetchStatus();
 fetchLogs();
 setInterval(fetchStatus, 10000);
@@ -793,15 +1009,33 @@ setInterval(fetchLogs, 5000);
 
 # ── Main ──────────────────────────────────────────────────────────────────
 
+class ThreadedPanelServer(ThreadingMixIn, http.server.HTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
 def serve_forever(host="0.0.0.0", port=8083):
-    server = http.server.HTTPServer((host, port), PanelHandler)
-    log(f"listening on http://{host}:{port}")
-    log(f"open http://127.0.0.1:{port} in your browser")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        log("shutting down")
-        server.shutdown()
+    server = None
+    while True:
+        try:
+            if server:
+                try:
+                    server.server_close()
+                except:
+                    pass
+            server = ThreadedPanelServer((host, port), PanelHandler)
+            log(f"listening on http://{host}:{port}")
+            log(f"open http://127.0.0.1:{port} in your browser")
+            server.serve_forever()
+        except KeyboardInterrupt:
+            log("shutting down")
+            try:
+                server.shutdown()
+            except:
+                pass
+            return
+        except Exception as e:
+            log(f"server crashed ({e}), restarting in 2 seconds...")
+            time.sleep(2)
 
 
 if __name__ == "__main__":
