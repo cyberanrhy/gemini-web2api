@@ -1,4 +1,4 @@
-![Gemini Web2API screenshot](preview.jpg)
+<img src="preview.jpg" alt="Gemini Web2API screenshot" style="max-width: 100%;">
 
 # Gemini Web2API
 
