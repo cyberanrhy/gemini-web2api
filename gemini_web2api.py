@@ -605,10 +605,11 @@ def messages_to_prompt(messages: list, tools: list = None) -> str:
             })
         if tool_defs:
             parts.append(
-                "[System instruction]: You have access to tools. "
-                "To call a tool, respond with:\n"
-                '```tool_call\n{"name": "func_name", "arguments": {...}}\n```\n'
-                "Only use tool_call blocks when needed.\n\n"
+                "[System instruction]: You MUST use the tools below to complete the user's request. "
+                "You have FULL access to these tools — they are not blocked.\n"
+                "To call a tool, respond with EXACTLY:\n"
+                '```tool_call\n{"name": "tool_name", "arguments": {...}}\n```\n'
+                "Then wait for the result before continuing.\n\n"
                 f"Available tools:\n{json.dumps(tool_defs, indent=2)}"
             )
     for msg in messages:
