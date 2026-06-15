@@ -784,6 +784,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
         SESSION_EXPIRY_CODES = {"1060", "1155"}
         SESSION_EXPIRY_E_CODES = {38, 40, 49, 52}
         RETRY_DELAYS = [15, 60, 180, 360]
+        recovered = False
 
         for attempt in range(len(RETRY_DELAYS) + 1):
             raw = gemini_stream_generate(prompt, model_id, think_mode)
@@ -856,17 +857,21 @@ class GeminiHandler(BaseHTTPRequestHandler):
                     log(f"Rate limit, retry {attempt+1}/{len(RETRY_DELAYS)} in {delay}s...")
                     time.sleep(delay)
                     continue
-            # Auto-recover session expiry
+            # Auto-recover session expiry (one retry only)
             if err and code and (code in SESSION_EXPIRY_CODES or (isinstance(code, str) and code.startswith("e:") and int(code.split(":")[1]) in SESSION_EXPIRY_E_CODES)):
-                log(f"Session expired ({code}), attempting auto-recovery...")
-                try:
-                    _init_http_session()
-                    gemini_init()
-                    log("Session recovery OK, retrying request...")
-                    time.sleep(2)
-                    continue
-                except Exception as recoverr:
-                    log(f"Session recovery failed: {recoverr}")
+                if not recovered:
+                    recovered = True
+                    log(f"Session expired ({code}), attempting auto-recovery...")
+                    try:
+                        _init_http_session()
+                        gemini_init()
+                        log("Session recovery OK, retrying request...")
+                        time.sleep(2)
+                        continue
+                    except Exception as recoverr:
+                        log(f"Session recovery failed: {recoverr}")
+                else:
+                    log(f"Session recovery already attempted, giving up.")
             if err:
                 return err, None
             break
