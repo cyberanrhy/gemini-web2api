@@ -609,6 +609,8 @@ def parse_tool_calls(text: str) -> tuple:
 
 class GeminiHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
+        if "GET /v1/models" in fmt % args:
+            return
         log(fmt % args)
 
     def _reason(self, code):
@@ -616,7 +618,8 @@ class GeminiHandler(BaseHTTPRequestHandler):
                 404: "Not Found", 500: "Internal Server Error", 502: "Bad Gateway"}.get(code, "OK")
 
     def _sendall(self, status, content_type, body, extra_headers=None):
-        log(f"<- {self.command} {self.path} -> {status}")
+        if self.path != "/v1/models":
+            log(f"<- {self.command} {self.path} -> {status}")
         header = f"HTTP/1.1 {status} {self._reason(status)}\r\n"
         header += f"Content-Type: {content_type}\r\n"
         header += "Access-Control-Allow-Origin: *\r\n"
@@ -723,7 +726,6 @@ class GeminiHandler(BaseHTTPRequestHandler):
                 "1050": "Gemini temporarily unavailable (maintenance).",
                 "1060": "Gemini session expired — need fresh cookies.",
             "1096": "CAPTCHA required — open Gemini in browser and verify you are human.",
-                "1099": "Gemini session expired — need fresh cookies or update gemini_bl.",
                 "1150": "Too many requests — Gemini rate limit exceeded.",
                 "1152": "Too many requests — Gemini rate limit exceeded.",
                 "1160": "Response blocked by Gemini safety filter.",
