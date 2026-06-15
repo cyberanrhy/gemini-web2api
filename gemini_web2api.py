@@ -12,6 +12,7 @@ import uuid
 import re
 import os
 import random
+import threading
 import hashlib
 import argparse
 import base64
@@ -181,9 +182,34 @@ def _save_session_cookies():
         if updated:
             with open(cookie_file, "w") as f:
                 f.writelines(lines)
-            log(f"Updated {updated} cookies from session (incl. __Secure-STRP)")
+            log(f"Updated {updated} cookies from session")
     except Exception as e:
         log(f"Failed to save session cookies: {e}")
+
+
+# ─── Proactive session refresh ─────────────────────────────────────────────
+
+_PROACTIVE_REFRESH_INTERVAL = 900  # 15 minutes
+
+def start_proactive_refresh():
+    """Background thread: periodically refresh the Gemini session."""
+    import threading
+    def _run():
+        while True:
+            time.sleep(_PROACTIVE_REFRESH_INTERVAL)
+            try:
+                old_token = CONFIG.get("xsrf_token")
+                _init_http_session()
+                gemini_init()
+                if CONFIG.get("xsrf_token") != old_token:
+                    log("Proactive refresh: xsrf_token updated")
+                else:
+                    log("Proactive refresh: OK (token unchanged)")
+            except Exception as e:
+                log(f"Proactive refresh failed: {e}")
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    log(f"Proactive refresh started (every {_PROACTIVE_REFRESH_INTERVAL}s)")
 
 
 def _init_http_session():
@@ -1250,6 +1276,8 @@ def main():
             print("  2. View page source (Ctrl+U), search for 'SNlM0e'")
             print("  3. Copy the value into config.json as 'xsrf_token'")
             sys.exit(1)
+    gemini_init()
+    start_proactive_refresh()
 
     class ThreadedServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
