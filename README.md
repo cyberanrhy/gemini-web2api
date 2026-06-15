@@ -200,6 +200,23 @@ gemini-web2api/
 └── LICENSE
 ```
 
+## Cross-platform compatibility
+
+Currently **Linux-only** (tested on Debian/Ubuntu). The proxy scripts (`gemini_web2api.py`) should work on macOS with minimal changes, but the **Control Panel** (`panel.py`) depends on Linux-specific tools:
+
+| Feature | Linux | macOS | Windows |
+|---------|-------|-------|---------|
+| Proxy core | ✅ | ⚠️ may work | ❌ `curl_cffi` for Claude needs OpenSSL |
+| Control Panel | ✅ | ❌ `fuser`, `xdg-open`, `ss` | ❌ `fuser`, `os.kill` signals |
+
+### Porting plan
+
+1. **Proxy core** (`gemini_web2api.py` / `claude_web2api.py`): replace `curl_cffi` with `httpx` or `aiohttp` (Windows-compatible)
+2. **Panel** (`panel.py`): replace `fuser` → `psutil` / `netstat`, `ss` → `socket` probe, `xdg-open` → `webbrowser.open`
+3. **Cookie refresh**: Firefox cookies.txt export works cross-platform, `cookie.sh` needs `pycryptodome` adjustments
+
+Contributions welcome!
+
 ## License
 
 MIT
