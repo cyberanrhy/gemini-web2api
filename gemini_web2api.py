@@ -577,13 +577,19 @@ def extract_response_text(raw: str) -> str:
 # ─── OpenAI Format Helpers ───────────────────────────────────────────────────
 
 MAX_CONTEXT_MSGS = 10
+MAX_TOOL_CHARS = 8000
 
 def trim_context(messages: list) -> list:
     """Trim messages to prevent oversized context payloads."""
     system = [m for m in messages if m.get("role") == "system"]
     others = [m for m in messages if m.get("role") != "system"]
     kept = others[-MAX_CONTEXT_MSGS:] if len(others) > MAX_CONTEXT_MSGS else others
-    return system + kept
+    result = system + kept
+    for m in result:
+        content = m.get("content", "")
+        if isinstance(content, str) and len(content) > MAX_TOOL_CHARS:
+            m["content"] = content[:MAX_TOOL_CHARS] + f"\n[... truncated {len(content)-MAX_TOOL_CHARS} chars]"
+    return result
 
 def messages_to_prompt(messages: list, tools: list = None) -> str:
     """Convert OpenAI messages to prompt string."""
@@ -787,6 +793,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
             "1096": "CAPTCHA required — open Gemini in browser and verify you are human.",
                 "1150": "Too many requests — Gemini rate limit exceeded.",
                 "1152": "Too many requests — Gemini rate limit exceeded.",
+                "1155": "Session expired or invalid — refresh cookies or re-authenticate.",
                 "1160": "Response blocked by Gemini safety filter.",
                 "1170": "Model unavailable for this request.",
                 "1180": "Gemini network error — check your connection.",
