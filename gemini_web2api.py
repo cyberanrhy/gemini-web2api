@@ -959,7 +959,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
         # Human-like delay when last message is a tool result
         msgs = req.get("messages", [])
         if msgs and msgs[-1].get("role") in ("tool",):
-            delay = random.uniform(2.0, 8.0)
+            delay = random.uniform(4.0, 15.0)
             log(f"Tool result detected, waiting {delay:.1f}s to simulate human...")
             time.sleep(delay)
 
@@ -1076,7 +1076,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
 
         # Human-like delay when last message is a tool result
         if messages and messages[-1].get("role") in ("tool", "function_call_output"):
-            delay = random.uniform(2.0, 8.0)
+            delay = random.uniform(4.0, 15.0)
             log(f"Tool result detected, waiting {delay:.1f}s to simulate human...")
             time.sleep(delay)
 
