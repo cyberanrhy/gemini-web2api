@@ -11,6 +11,7 @@ import sys
 import uuid
 import re
 import os
+import random
 import hashlib
 import argparse
 import base64
@@ -756,7 +757,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
     def _call_gemini(self, prompt, model_id, think_mode, tools):
         RATE_LIMIT_CODES = {"1150", "1152"}
         RATE_LIMIT_E_CODES = {3, 4, 8, 29, 32, 47, 52}
-        RETRY_DELAYS = [5, 10, 20]
+        RETRY_DELAYS = [15, 60, 180, 360]
 
         for attempt in range(len(RETRY_DELAYS) + 1):
             raw = gemini_stream_generate(prompt, model_id, think_mode)
@@ -822,7 +823,9 @@ class GeminiHandler(BaseHTTPRequestHandler):
                         code = f"e:{ecode}"
             if err and code and (code in RATE_LIMIT_CODES or (isinstance(code, str) and code.startswith("e:") and int(code.split(":")[1]) in RATE_LIMIT_E_CODES)):
                 if attempt < len(RETRY_DELAYS):
-                    delay = RETRY_DELAYS[attempt]
+                    base_delay = RETRY_DELAYS[attempt]
+                    jitter = random.uniform(0.7, 1.3)
+                    delay = round(base_delay * jitter, 1)
                     log(f"Rate limit, retry {attempt+1}/{len(RETRY_DELAYS)} in {delay}s...")
                     time.sleep(delay)
                     continue
