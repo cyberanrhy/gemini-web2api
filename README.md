@@ -1,4 +1,4 @@
-<img src="preview.jpg" alt="Gemini Web2API screenshot" style="max-width: 100%;">
+<img src="/cyberanrhy/gemini-web2api/raw/main/preview.jpg" alt="Gemini Web2API screenshot" style="max-width: 100%;">
 
 # Gemini Web2API
 
