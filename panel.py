@@ -539,11 +539,11 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
         if os.path.exists(script):
             try:
                 subprocess.Popen(
-                    ["gnome-terminal", "--hold", "--", "bash", "-c", script],
+                    ["bash", script],
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
-                return {"success": True, "message": f"Launched {script}"}
+                return {"success": True, "message": f"Launched {script} in background"}
             except Exception as e:
                 return {"success": False, "message": str(e)}
         else:
