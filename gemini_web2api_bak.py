@@ -100,7 +100,7 @@ def load_cookie() -> tuple:
     if not cookie_file or not os.path.exists(cookie_file):
         return "", None
     try:
-        with open(cookie_file, "r", encoding="utf-8", errors="replace") as f:
+        with open(cookie_file, "r") as f:
             content = f.read().strip()
 
         if content.startswith("{"):
@@ -138,7 +138,6 @@ RELEVANT_COOKIES = {
 }
 
 _HTTP_SESSION = None
-_SESSION_LOCK = threading.Lock()
 
 
 def _save_session_cookies():
@@ -149,48 +148,34 @@ def _save_session_cookies():
     cookie_file = CONFIG.get("cookie_file")
     if not cookie_file or not os.path.exists(cookie_file):
         return
-    
-    with _SESSION_LOCK:
-        try:
-            with open(cookie_file, "r", encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
-            
-            jar = _HTTP_SESSION.cookies.jar if hasattr(_HTTP_SESSION.cookies, 'jar') else _HTTP_SESSION.cookies
-            session_cookies = {c.name: c for c in jar}
-            existing_names = set()
-            updated = 0
-            
-            for i, line in enumerate(lines):
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
-                parts = stripped.split("\t")
-                if len(parts) >= 7:
-                    name = parts[5]
-                    existing_names.add(name)
-                    if name in session_cookies and name != "NID":
-                        sc = session_cookies[name]
-                        new_expiry = int(sc.expires) if sc.expires else int(time.time()) + 86400
-                        parts[4] = str(new_expiry)
-                        parts[6] = sc.value
-                        lines[i] = "\t".join(parts) + "\n"
-                        updated += 1
-            
-            for name, sc in session_cookies.items():
-                if name not in existing_names and name != "NID":
-                    domain = getattr(sc, 'domain', '.google.com')
-                    path = getattr(sc, 'path', '/')
-                    secure = "TRUE" if getattr(sc, 'secure', False) else "FALSE"
-                    expiry = int(sc.expires) if sc.expires else int(time.time()) + 86400
-                    lines.append(f"{domain}\tTRUE\t{path}\t{secure}\t{expiry}\t{name}\t{sc.value}\n")
+    try:
+        with open(cookie_file) as f:
+            lines = f.readlines()
+        jar = _HTTP_SESSION.cookies.jar if hasattr(_HTTP_SESSION.cookies, 'jar') else _HTTP_SESSION.cookies
+        session_cookies = {}
+        for c in jar:
+            session_cookies[c.name] = c
+        updated = 0
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            parts = stripped.split("\t")
+            if len(parts) >= 7:
+                name = parts[5]
+                if name in session_cookies and name != "NID":
+                    sc = session_cookies[name]
+                    new_expiry = int(sc.expires) if sc.expires else int(time.time()) + 86400
+                    parts[4] = str(new_expiry)
+                    parts[6] = sc.value
+                    lines[i] = "\t".join(parts) + "\n"
                     updated += 1
-            
-            if updated:
-                with open(cookie_file, "w", encoding="utf-8") as f:
-                    f.writelines(lines)
-                log(f"Updated {updated} cookies from session")
-        except Exception as e:
-            log(f"Failed to save session cookies: {e}")
+        if updated:
+            with open(cookie_file, "w") as f:
+                f.writelines(lines)
+            log(f"Updated {updated} cookies from session")
+    except Exception as e:
+        log(f"Failed to save session cookies: {e}")
 
 
 # ─── Proactive session refresh ─────────────────────────────────────────────
@@ -202,9 +187,7 @@ def start_proactive_refresh():
     import threading
     def _run():
         while True:
-            # Jitter: 900 +/- 180 сек (от 12 до 18 минут)
-            sleep_time = _PROACTIVE_REFRESH_INTERVAL + random.randint(-180, 180)
-            time.sleep(sleep_time)
+            time.sleep(_PROACTIVE_REFRESH_INTERVAL)
             try:
                 old_token = CONFIG.get("xsrf_token")
                 _init_http_session()
@@ -222,35 +205,23 @@ def start_proactive_refresh():
 
 def _init_http_session():
     global _HTTP_SESSION
-    with _SESSION_LOCK:
-        if _HTTP_SESSION is not None:
-            return
-        _HTTP_SESSION = CurlSession(impersonate="firefox147", http_version=CurlHttpVersion.V2)
-        _HTTP_SESSION.trust_env = False
-        _HTTP_SESSION.headers.update({
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0",
-            "Origin": "https://gemini.google.com",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
-            "Upgrade-Insecure-Requests": "1"
-        })
-        proxy = CONFIG.get("proxy")
-        if proxy:
-            _HTTP_SESSION.proxies = {"http": proxy, "https": proxy}
+    if _HTTP_SESSION is not None:
+        return
+    _HTTP_SESSION = CurlSession(impersonate="firefox147")
+    _HTTP_SESSION.trust_env = False
+    _HTTP_SESSION.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:147.0) Gecko/20100101 Firefox/147.0",
+        "Origin": "https://gemini.google.com",
+    })
+    proxy = CONFIG.get("proxy")
+    if proxy:
+        _HTTP_SESSION.proxies = {"http": proxy, "https": proxy}
 
 def gemini_init(max_attempts=3):
     """Init Gemini session: GET /app, extract SNlM0e (xsrf) and cfb2h (build_label)."""
     if not HAS_CURLFFI:
         return False
     _init_http_session()
-    # Warmup: visit home page first
-    _HTTP_SESSION.get("https://gemini.google.com/", timeout=CONFIG["request_timeout_sec"])
-    # Человеческая задержка перед первым запросом
-    time.sleep(random.uniform(4.0, 12.0))
     prefix = account_prefix()
     url = f"https://gemini.google.com{prefix}/app"
 
@@ -266,7 +237,6 @@ def gemini_init(max_attempts=3):
     if prefix:
         headers["X-Goog-AuthUser"] = str(CONFIG["auth_user"])
 
-    _HTTP_SESSION.cookies.clear()
     for attempt in range(max_attempts):
         try:
             resp = _HTTP_SESSION.get(url, headers=headers, timeout=CONFIG["request_timeout_sec"])
@@ -320,7 +290,7 @@ def gemini_stream_generate(prompt: str, model_id: int, think_mode: int) -> str:
         "Origin": "https://gemini.google.com",
         "Referer": f"https://gemini.google.com{prefix}/",
         "X-Same-Domain": "1",
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:147.0) Gecko/20100101 Firefox/147.0",
     }
     if prefix:
         headers["X-Goog-AuthUser"] = str(CONFIG["auth_user"])
@@ -330,15 +300,10 @@ def gemini_stream_generate(prompt: str, model_id: int, think_mode: int) -> str:
         headers["Cookie"] = cookie_str
 
     log(f"upstream POST {model_id} (len={len(body)})")
-    _init_http_session()
-    _HTTP_SESSION.cookies.clear()
-    
-    # Имитация набора текста/раздумий перед отправкой
-    time.sleep(random.uniform(2.0, 5.0))
-    
     last_err = None
     for attempt in range(CONFIG["retry_attempts"]):
         try:
+            _init_http_session()
             resp = _HTTP_SESSION.post(url, data=body, headers=headers, timeout=CONFIG["request_timeout_sec"])
             return resp.text
         except Exception as e:
@@ -386,7 +351,7 @@ def gemini_stream_generate_iter(prompt: str, model_id: int, think_mode: int):
         "Origin": "https://gemini.google.com",
         "Referer": f"https://gemini.google.com{prefix}/",
         "X-Same-Domain": "1",
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:147.0) Gecko/20100101 Firefox/147.0",
     }
     if prefix:
         headers["X-Goog-AuthUser"] = str(CONFIG["auth_user"])
@@ -406,7 +371,6 @@ def gemini_stream_generate_iter(prompt: str, model_id: int, think_mode: int):
 
     if HAS_CURLFFI:
         _init_http_session()
-        _HTTP_SESSION.cookies.clear()
         resp = _HTTP_SESSION.post(url, data=body, headers=headers, stream=True, timeout=CONFIG["request_timeout_sec"])
         buf = ""
         for chunk in resp.iter_content():
@@ -415,11 +379,6 @@ def gemini_stream_generate_iter(prompt: str, model_id: int, think_mode: int):
             buf += chunk.decode("utf-8", errors="replace")
             while "\n" in buf:
                 line, buf = buf.split("\n", 1)
-                # Check for upstream errors in streaming response
-                if "BardErrorInfo" in line or ('"48448350"' in line and '"xsrf"' in line):
-                    return
-                if '"e",' in line and len(line) < 200:
-                    return
                 if '"wrb.fr"' not in line or len(line) < 200:
                     continue
                 try:
@@ -450,10 +409,6 @@ def gemini_stream_generate_iter(prompt: str, model_id: int, think_mode: int):
                     buf += chunk
                     while "\n" in buf:
                         line, buf = buf.split("\n", 1)
-                        if "BardErrorInfo" in line or ('"48448350"' in line and '"xsrf"' in line):
-                            return
-                        if '"e",' in line and len(line) < 200:
-                            return
                         if '"wrb.fr"' not in line or len(line) < 200:
                             continue
                         try:
@@ -725,7 +680,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
 
         RATE_LIMIT_CODES = {"1150", "1152"}
         RATE_LIMIT_E_CODES = {3, 4, 8, 29, 32, 47}
-        SESSION_EXPIRY_CODES = {"1060", "1095", "1155"}
+        SESSION_EXPIRY_CODES = {"1060", "1155"}
         SESSION_EXPIRY_E_CODES = {38, 40, 49, 52}
         RETRY_DELAYS = [15, 60, 180, 360]
         recovered = False
@@ -737,7 +692,6 @@ class GeminiHandler(BaseHTTPRequestHandler):
             ERROR_CODES = {
                 "1050": "Gemini temporarily unavailable (maintenance).",
                 "1060": "Gemini session expired — need fresh cookies.",
-                "1095": "Session blocked — try switching VPN node or refreshing cookies.",
             "1096": "CAPTCHA required — open Gemini in browser and verify you are human.",
                 "1150": "Too many requests — Gemini rate limit exceeded.",
                 "1152": "Too many requests — Gemini rate limit exceeded.",
@@ -818,7 +772,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
                 else:
                     log(f"Session recovery already attempted, giving up.")
             if err:
-                raise Exception(err)
+                return err, None
             break
 
         text = extract_response_text(raw)
@@ -1012,8 +966,8 @@ class GeminiHandler(BaseHTTPRequestHandler):
     # ─── Google Native API (Gemini CLI compatible) ────────────────────────────
 
     def _parse_google_model_from_path(self):
-        """Extract model name from /v1/models/{model}:method or /v1beta/models/{model}:method."""
-        m = re.match(r'/v1(?:beta)?/models/([^:?]+)', self.path)
+        """Extract model name from /v1beta/models/{model}:method path."""
+        m = re.match(r'/v1beta/models/([^:?]+)', self.path)
         if m:
             return m.group(1)
         return None
@@ -1061,7 +1015,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
             self.send_json({"error": {"message": "model not specified in path"}}, 400)
             return
 
-        model_name, model_id, think_mode, provider, err = self._resolve_model(model_name)
+        model_name, model_id, think_mode, err = self._resolve_model(model_name)
         if err:
             self.send_json({"error": {"message": err}}, 400)
             return
@@ -1158,17 +1112,16 @@ def main():
 
     if not CONFIG.get("xsrf_token"):
         log("xsrf_token not set — trying auto-init...")
-    try:
-        gemini_init()
-    except Exception as e:
-        if not CONFIG.get("xsrf_token"):
+        try:
+            gemini_init()
+        except Exception as e:
             print(f"ERROR: Could not auto-init xsrf_token: {e}")
             print("  Set xsrf_token manually in config.json:")
             print("  1. Open https://gemini.google.com/app in Firefox")
             print("  2. View page source (Ctrl+U), search for 'SNlM0e'")
             print("  3. Copy the value into config.json as 'xsrf_token'")
             sys.exit(1)
-        log(f"Init warning (non-fatal): {e}")
+    gemini_init()
     start_proactive_refresh()
 
     class ThreadedServer(ThreadingMixIn, HTTPServer):

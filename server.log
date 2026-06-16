@@ -1,0 +1,17 @@
+[20:23:19] Config loaded: ./config.json
+[20:23:19] xsrf_token not set — trying auto-init...
+[20:23:25] Extracted SNlM0e xsrf token from /app
+[20:23:25] Init: page has cfb2h=boq_assistant-bard-web-server_20260615.05_p0 (config: boq_assistant-bard-web-server_20260610.04_p0)
+[20:23:25] Updated 3 cookies from session
+[20:23:25] Proactive refresh started (every 900s)
+[20:24:48] <- GET / -> 200
+[20:24:48] <- GET /favicon.ico -> 404
+[20:24:56] <- GET / -> 200
+[20:25:45] <- GET / -> 200
+[20:38:28] Init: page has cfb2h=boq_assistant-bard-web-server_20260615.05_p0 (config: boq_assistant-bard-web-server_20260610.04_p0)
+[20:38:28] Proactive refresh: OK (token unchanged)
+[20:53:34] Init: page has cfb2h=boq_assistant-bard-web-server_20260615.05_p0 (config: boq_assistant-bard-web-server_20260610.04_p0)
+[20:53:35] Proactive refresh: OK (token unchanged)
+[20:53:54] chat: model=gemini-3.5-flash provider=gemini msgs=1 stream=None tools=False
+[20:53:54] upstream POST 1 (len=161)
+[20:53:57] <- POST /v1/chat/completions -> 502
