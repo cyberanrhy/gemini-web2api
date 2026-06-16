@@ -225,7 +225,7 @@ def _init_http_session():
     with _SESSION_LOCK:
         if _HTTP_SESSION is not None:
             return
-        _HTTP_SESSION = CurlSession(impersonate="firefox147", http_version=CurlHttpVersion.V2)
+        _HTTP_SESSION = CurlSession(impersonate="firefox147")
         _HTTP_SESSION.trust_env = False
         _HTTP_SESSION.headers.update({
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0",
