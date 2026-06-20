@@ -85,6 +85,10 @@ MODELS = {
         "mode": 6, "think": 4, "provider": "gemini",
         "desc": "Lightweight fast model",
     },
+    "gemini-3.1-flash-lite": {
+        "mode": 6, "think": 4, "provider": "gemini",
+        "desc": "3.1 Flash Lite",
+    },
 }
 
 # ─── Utilities ───────────────────────────────────────────────────────────────
@@ -652,6 +656,8 @@ class GeminiHandler(BaseHTTPRequestHandler):
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
             "Access-Control-Allow-Headers": "*"
         })
+
+
 
     def do_GET(self):
         try:

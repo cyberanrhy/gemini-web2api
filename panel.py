@@ -570,11 +570,18 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
             gemini_rt = round(time.time() - t0, 3)
             gemini_alive = code == 200
 
+        claude_rate_limit = None
         if claude_alive:
             t0 = time.time()
-            code, _ = http_get(f"http://127.0.0.1:{CLAUDE_PORT}/v1/models")
+            code, body = http_get(f"http://127.0.0.1:{CLAUDE_PORT}/health")
             claude_rt = round(time.time() - t0, 3)
             claude_alive = code == 200
+            if code == 200 and body:
+                try:
+                    hdata = json.loads(body) if isinstance(body, str) else body
+                    claude_rate_limit = hdata.get("rate_limit") or None
+                except:
+                    pass
 
         gemini_cookie_expiry = parse_cookie_expiry(GEMINI_COOKIE_FILE)
         claude_cookie_expiry = parse_cookie_expiry(CLAUDE_COOKIE_FILE)
@@ -600,6 +607,7 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
                 "cookie_expiry_days": claude_cookie_expiry,
                 "log_exists": os.path.exists(CLAUDE_LOG),
                 "proxy": claude_proxy,
+                "rate_limit": claude_rate_limit,
             },
             "vpn": {"alive": vpn_alive, "port": VPN_PORT},
         }
@@ -812,6 +820,7 @@ footer a:hover{color:#0f0}
       <div class="row"><span class="label" data-i18n="label_status">STATUS</span><span class="value" id="claudeStatus"><span data-i18n="scanning">scanning...</span></span></div>
       <div class="row"><span class="label" data-i18n="label_rt">RESPONSE TIME</span><span class="value" id="claudeRT">--</span></div>
       <div class="row"><span class="label" data-i18n="label_cookies">COOKIE EXPIRY</span><span class="value" id="claudeCookies">--</span></div>
+      <div class="row"><span class="label" data-i18n="label_rate_limit">RATE LIMIT</span><span class="value" id="claudeRateLimit" style="color:#fa0">--</span></div>
       <div class="row"><span class="label" data-i18n="label_upstream">UPSTREAM</span><span class="value" id="claudeUpstream">--</span></div>
       <div class="row"><span class="label" data-i18n="label_proxy">PROXY</span><span class="value" id="claudeProxyRow"><span id="claudeProxyToggle" style="cursor:pointer"></span> <input id="claudeProxyUrl" type="text" style="background:#000;color:#0f0;border:1px solid #0a0;width:180px;font-family:inherit;font-size:0.85em;padding:1px 4px" placeholder="http://..."> <button class="btn small" onclick="saveProxy('claude')" data-i18n-title="title_save_proxy">SAVE</button></span></div>
     </div>
@@ -895,6 +904,8 @@ const LANG = {
     label_status: 'STATUS',
     label_rt: 'RESPONSE TIME',
     label_cookies: 'COOKIE EXPIRY',
+    label_rate_limit: 'RATE LIMIT',
+    rate_limit_reset: 'reset in',
     scanning: 'scanning...',
     title_restart: 'Kill & restart the proxy process',
     title_export: 'Open Firefox to export cookies to terminal',
@@ -978,6 +989,8 @@ const LANG = {
     label_status: 'СТАТУС',
     label_rt: 'ВРЕМЯ ОТВЕТА',
     label_cookies: 'СРОК КУК',
+    label_rate_limit: 'ЛИМИТЫ',
+    rate_limit_reset: 'сброс через',
     scanning: 'сканирование...',
     title_restart: 'Убить и перезапустить прокси',
     title_export: 'Открыть Firefox для экспорта кук в терминал',
@@ -1184,6 +1197,26 @@ async function fetchStatus(){
     } else if(s.installed) {
       ck.textContent = t('unknown');
       ck.style.color = '#060';
+    }
+
+    // Rate limit display
+    if(name === 'claude'){
+      const rlEl = document.getElementById('claudeRateLimit');
+      if(s.rate_limit && s.rate_limit.reset_at){
+        const remaining = Math.max(0, Math.ceil(s.rate_limit.reset_at - Date.now()/1000));
+        const hrs = Math.floor(remaining / 3600);
+        const mins = Math.floor((remaining % 3600) / 60);
+        const secs = remaining % 60;
+        const parts = [];
+        if(hrs > 0) parts.push(hrs + 'h');
+        parts.push(mins + 'm');
+        parts.push(secs + 's');
+        rlEl.textContent = t('rate_limit_reset') + ' ' + parts.join(' ');
+        rlEl.style.color = '#fa0';
+      }else{
+        rlEl.textContent = '--';
+        rlEl.style.color = '#060';
+      }
     }
 
     // Proxy toggle
